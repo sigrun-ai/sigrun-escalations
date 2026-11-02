@@ -1,4 +1,4 @@
-# @sigrun/ext-escalations
+# @sigrun/escalations
 
 An asynchronous decision inbox for [sigrun](https://github.com/sigrun-ai/sigrun). Jobs and agents can ask a person to choose a course of action without pausing the work that raised the question. Escalations are durable records with a complete history; they live in their own **Inbox** pane rather than blocking a conversation.
 
@@ -8,7 +8,7 @@ Unlike a mid-conversation question, an escalation does not suspend its source. A
 
 This extension requires **sigrun core with job hooks (unreleased at the time of writing)** — the first release carrying `host.notify`, `host.jobs` and `conversations.create({job})`.
 
-Add `@sigrun/ext-escalations` to the `extensions` list in sigrun's settings. The extension contributes the three agent tools, the Inbox view, and a maintenance job that runs every 15 minutes.
+Add `@sigrun/escalations` to the `extensions` list in sigrun's settings. The extension contributes the three agent tools, the Inbox view, and a maintenance job that runs every 15 minutes.
 
 ## Agent tools
 

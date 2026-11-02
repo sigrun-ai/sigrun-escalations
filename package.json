@@ -1,5 +1,5 @@
 {
-	"name": "@sigrun/ext-escalations",
+	"name": "@sigrun/escalations",
 	"version": "0.1.0",
 	"description": "Escalation inbox extension for sigrun: async decisions for jobs and agents",
 	"type": "module",
@@ -19,7 +19,7 @@
 		"CHANGELOG.md"
 	],
 	"scripts": {
-		"test": "node scripts/check-manifest.mjs --expect-name @sigrun/ext-escalations && vitest run",
+		"test": "node scripts/check-manifest.mjs --expect-name @sigrun/escalations && vitest run",
 		"typecheck": "tsc --noEmit",
 		"build": "tsc -p tsconfig.build.json",
 		"prepublishOnly": "npm run build"
@@ -43,12 +43,12 @@
 	"license": "MIT",
 	"repository": {
 		"type": "github",
-		"url": "git+https://github.com/sigrun-ai/sigrun-ext-escalations.git"
+		"url": "git+https://github.com/sigrun-ai/sigrun-escalations.git"
 	},
 	"bugs": {
-		"url": "https://github.com/sigrun-ai/sigrun-ext-escalations/issues"
+		"url": "https://github.com/sigrun-ai/sigrun-escalations/issues"
 	},
-	"homepage": "https://github.com/sigrun-ai/sigrun-ext-escalations#readme",
+	"homepage": "https://github.com/sigrun-ai/sigrun-escalations#readme",
 	"publishConfig": {
 		"access": "public",
 		"provenance": true

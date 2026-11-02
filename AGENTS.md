@@ -1,4 +1,4 @@
-# AGENTS.md — sigrun-ext-escalations
+# AGENTS.md — sigrun-escalations
 
 Guidance for coding agents working in this repository.
 
