@@ -3,7 +3,7 @@ export type OnAnswer = "next-run" | "immediate";
 export type ReopenReason = "snooze-ended" | "failed" | "interrupted" | "job-deleted";
 export interface EscalationOption { id: string; label: string; detail?: string }
 export interface EscalationAnswer { option?: string; instruction?: string; by?: string; at: string }
-export interface HistoryEntry { at: string; event: "raised" | "answered" | "withdrawn" | "claimed" | "resolved" | "failed" | "interrupted" | "dismissed" | "restored" | "snoozed" | "snooze-ended" | "job-deleted"; note?: string; answer?: EscalationAnswer }
+export interface HistoryEntry { at: string; event: "raised" | "answered" | "withdrawn" | "claimed" | "resolved" | "failed" | "interrupted" | "dismissed" | "restored" | "snoozed" | "snooze-ended" | "job-deleted" | "transferred"; note?: string; answer?: EscalationAnswer }
 export interface Escalation {
   id: string;                 // crypto.randomUUID()
   owner?: string;             // undefined → shared bucket (empty directory only)

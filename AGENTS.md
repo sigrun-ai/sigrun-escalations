@@ -15,6 +15,8 @@ taking the `SigrunHost`, returning a `SigrunExtensionResult` (types from
 
 ## Layout
 
+- `src/index.ts` — the default-export factory: one shared `EscalationStore`
+  wired to the tools, dispatch, sweep, Inbox, and at-least-once user transfer.
 - `src/types.ts` — escalation records and shared lifecycle types.
 - `src/lifecycle.ts` — pure escalation state transitions.
 - `test/fake-host.ts` — the in-memory `SigrunHost` with scriptable
@@ -45,6 +47,10 @@ npm run build       # tsc -> dist/ (commit the result)
   no-op. Invalid transitions throw `TransitionError` with a stable code.
 - Never auto-answer an escalation. Snooze expiry only reopens an item; failed
   and interrupted claims return it to open with the answer cleared.
+- Keep one `EscalationStore` per factory call. Its per-path serialization is
+  required across tools, dispatch, sweep, and views. On `userDeleted`, append
+  to the transfer target before removing from the source; retries deduplicate
+  by id.
 - Tests own their literals: synthetic users (`alice`, `bob`, `root-admin`),
   jobs (`nightly-check`), keys (`disk:/srv/a`), and hosts
   (`*.example.invalid`); no real tokens, personal job details, or private
