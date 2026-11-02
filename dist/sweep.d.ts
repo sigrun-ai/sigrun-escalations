@@ -3,10 +3,12 @@
  * cron job every 15 minutes. Pure host calls + store updates: no model,
  * no transcript content.
  *
- * Per bucket, ONE store.update: end due snoozes, orphan items whose job
- * was deleted, release claims older than 24h, and prune resolved items
- * older than 90 days. Job lookups are PREFETCHED before entering the
- * update so the bucket queue is never held across harness reads.
+ * Job transfers first copy their items to the current owner's bucket,
+ * then remove them from the source. Each remaining source bucket gets ONE
+ * lifecycle update: end due snoozes, orphan items whose job was deleted,
+ * release claims older than 24h, and prune resolved items older than 90
+ * days. Job lookups are PREFETCHED before entering updates so no bucket
+ * queue is held across harness reads.
  * Notifications and inbox-change signals fire AFTER the update, for
  * reopened/orphaned items only. A failing bucket lands in `errors` and
  * the sweep continues to the next bucket.

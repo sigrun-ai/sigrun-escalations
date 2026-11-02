@@ -5,6 +5,7 @@ import { createInboxView } from "./inbox.js";
 import { escalationsSection } from "./section.js";
 import { EscalationStore } from "./store.js";
 import { SWEEP_JOB, createSweepTask } from "./sweep.js";
+import { transferItems } from "./transfer.js";
 import { createTools } from "./tools.js";
 import type { Bucket } from "./types.js";
 
@@ -32,36 +33,13 @@ export default function createEscalations(host: SigrunHost): SigrunExtensionResu
 			// (src/server/routes/users.ts:303-305): host.stores.user(u) throws for
 			// unknown users, so both bucket paths must be available here.
 			const sourceItems = await store.list(source);
-
-			// Copy before removing: a crash between these updates leaves duplicates,
-			// which this idempotent copy resolves on the next delivery, never a loss.
-			const idsInTarget = await store.update(target, (targetItems) => {
-				const held = new Set(targetItems.map((item) => item.id));
-				const additions = sourceItems
-					.filter((item) => !held.has(item.id))
-					.map((item) => ({
-						...item,
-						owner: event.transferTo,
-						history: [
-							...item.history,
-							{
-								at: new Date().toISOString(),
-								event: "transferred" as const,
-								note: `transferred from ${event.user}`,
-							},
-						],
-					}));
-				return {
-					items: additions.length === 0
-						? targetItems
-						: [...targetItems, ...additions],
-					result: new Set([...held, ...additions.map((item) => item.id)]),
-				};
-			});
-			await store.update(source, (items) => ({
-				items: items.filter((item) => !idsInTarget.has(item.id)),
-				result: undefined,
-			}));
+			await transferItems(
+				store,
+				source,
+				target,
+				new Set(sourceItems.map((item) => item.id)),
+				new Date(),
+			);
 		},
 	};
 }

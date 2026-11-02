@@ -1,4 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { readFile } from "node:fs/promises";
 import type {
 	ExtensionRunSettledHandler,
@@ -11,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunSettled, seedText, startImmediateRun } from "../src/dispatch.js";
 import { answer, claim, raise } from "../src/lifecycle.js";
 import { EscalationStore } from "../src/store.js";
+import { createTools } from "../src/tools.js";
 import type { Bucket, Escalation } from "../src/types.js";
 import {
 	createFakeHost,
@@ -19,6 +21,7 @@ import {
 } from "./fake-host.js";
 
 const ALICE: Bucket = { kind: "user", user: "alice" };
+const BOB: Bucket = { kind: "user", user: "bob" };
 const NOW = new Date("2026-11-02T12:00:00.000Z");
 const hosts: FakeHost[] = [];
 
@@ -66,10 +69,11 @@ function calls(host: FakeHost, method: string) {
 async function settle(
 	handler: ExtensionRunSettledHandler,
 	conversationId: number,
+	owner = "alice",
 ): Promise<void> {
 	const event = {
 		conversationId,
-		owner: "alice",
+		owner,
 		inputs: [],
 		inputTexts: [],
 		outcome: { status: "unanswered", reason: "test" },
@@ -125,17 +129,64 @@ describe("startImmediateRun", () => {
 		]);
 	});
 
-	it("uses the job's current owner after a transfer", async () => {
-		const host = await fakeHost({ jobs: { "api:1": job("bob") } });
+	it("migrates a transferred job's item before dispatch so its new conversation can resolve and settle it", async () => {
+		const host = await fakeHost({
+			users: [
+				{ user: "alice", admin: false },
+				{ user: "bob", admin: false },
+			],
+			jobs: { "api:1": job("bob") },
+		});
 		const store = new EscalationStore(host);
 		const item = answer(immediate("act-1"), { option: "retry" }, NOW);
 		await seed(store, [item]);
 
-		await startImmediateRun({ host, store }, ALICE, item.id);
+		const conversationId = await startImmediateRun({ host, store, now: () => NOW }, ALICE, item.id);
+		expect(conversationId).toBe(1);
 		expect(calls(host, "conversations.create")[0]?.args[0]).toMatchObject({
 			owner: "bob",
 			job: "api:1",
 		});
+		expect(await store.list(ALICE)).toEqual([]);
+		expect((await store.list(BOB))[0]).toMatchObject({
+			owner: "bob",
+			status: "claimed",
+			claim: { conversationId: 1 },
+			history: [
+				...item.history,
+				{ at: NOW.toISOString(), event: "transferred", note: "transferred from alice" },
+				{ at: NOW.toISOString(), event: "claimed" },
+			],
+		});
+
+		const resolveTool = createTools({ host, store, now: () => NOW })
+			.find((tool) => tool.name === "escalation_resolve");
+		expect(resolveTool).toBeDefined();
+		const resolved = await resolveTool?.execute(
+			{ id: item.id, outcome: "done", note: "retry completed" },
+			{ conversationId: 1, callId: "call-1" } as ToolExecutionApi,
+			BACKGROUND_CONTEXT,
+		);
+		expect(resolved?.structuredOutput).toEqual({ id: item.id, status: "resolved" });
+		expect((await store.list(BOB))[0]?.status).toBe("resolved");
+
+		const secondItem = answer(
+			{ ...immediate("act-2"), key: "disk:/srv/b" },
+			{ option: "retry" },
+			NOW,
+		);
+		await seed(store, [secondItem]);
+		const secondConversation = await startImmediateRun(
+			{ host, store, now: () => NOW },
+			ALICE,
+			secondItem.id,
+		);
+		expect(secondConversation).toBe(2);
+		const handler = createRunSettled({ host, store, now: () => NOW });
+		await settle(handler, secondConversation as number, "bob");
+		const settled = (await store.list(BOB)).find((candidate) => candidate.id === secondItem.id);
+		expect(settled?.status).toBe("open");
+		expect(settled?.claim).toBeUndefined();
 	});
 
 	it("leaves a lost claim unsubmitted and sends no notice", async () => {

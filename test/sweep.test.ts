@@ -88,6 +88,43 @@ afterEach(async () => {
 });
 
 describe("runSweep", () => {
+	it("migrates items after their job changes owner, then leaves the second sweep unchanged", async () => {
+		const host = await fakeHost({
+			users: [
+				{ user: "alice", admin: false },
+				{ user: "bob", admin: false },
+			],
+			jobs: { "nightly-check": job("bob") },
+		});
+		const store = new EscalationStore(host);
+		const first = item("first");
+		const second = answer(
+			{ ...item("second"), key: "disk:/srv/b" },
+			{ option: "retry", by: "alice" },
+			NOW,
+		);
+		await seed(store, ALICE, [first, second]);
+
+		await expect(runSweep({ host, store, now: () => NOW })).resolves.toMatchObject({ errors: [] });
+		expect(await store.list(ALICE)).toEqual([]);
+		const transferred = await store.list(BOB);
+		expect(transferred).toHaveLength(2);
+		expect(transferred.every((entry) => entry.owner === "bob")).toBe(true);
+		expect(transferred[1]?.answer).toEqual(second.answer);
+		for (const entry of transferred) {
+			expect(entry.history.at(-1)).toEqual({
+				at: NOW.toISOString(),
+				event: "transferred",
+				note: "transferred from alice",
+			});
+		}
+
+		const beforeSecondSweep = JSON.stringify(transferred);
+		await runSweep({ host, store, now: () => NOW });
+		expect(JSON.stringify(await store.list(BOB))).toBe(beforeSecondSweep);
+		expect(await store.list(ALICE)).toEqual([]);
+	});
+
 	it("exports the pinned task name and 15-minute sweep job", () => {
 		expect(SWEEP_TASK_NAME).toBe("escalations.sweep");
 		expect(SWEEP_JOB).toEqual({
@@ -254,7 +291,7 @@ describe("runSweep", () => {
 				{ user: "alice", admin: false },
 				{ user: "bob", admin: false },
 			],
-			jobs: { "nightly-check": job() },
+			jobs: { "nightly-check": job("bob") },
 		});
 		const store = new EscalationStore(host);
 		const alicePath = store.fileOf(ALICE);

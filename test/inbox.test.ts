@@ -21,7 +21,7 @@
  *   inbox surface instances.
  */
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { validateTree } from "@sigrun/sigrun/blocks";
 import type {
 	ActionResult,
@@ -469,6 +469,20 @@ describe("inbox actions", () => {
 		// Detail actions navigate back to the item.
 		expect(result).toMatchObject({
 			navigate: { type: "navigate", params: { id: item.id } },
+		});
+	});
+
+	test("answer toast says no run started when immediate dispatch fails", async () => {
+		const { host, store, view } = await rig();
+		const item = await seed(store, ALICE, { key: "disk:/srv/a", onAnswer: "immediate" });
+		vi.spyOn(host.conversations, "create").mockRejectedValue(new Error("create refused"));
+		const result = await act(view, ctxOf("alice"), "answer", {
+			itemId: item.id,
+			values: { option: "retry" },
+		});
+		expect(result).toMatchObject({
+			ok: true,
+			toast: "Answer sent — no run started; it will reopen",
 		});
 	});
 

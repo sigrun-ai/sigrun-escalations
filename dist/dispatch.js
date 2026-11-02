@@ -2,6 +2,7 @@ import { changedInbox } from "./keys.js";
 import { TransitionError, claim, release, reopen } from "./lifecycle.js";
 import { notifyReopened } from "./notify.js";
 import { bucketFor } from "./store.js";
+import { transferItems } from "./transfer.js";
 const RUN_ENDED = "run ended without resolving the escalation";
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -57,12 +58,21 @@ async function releaseClaim(deps, bucket, id, conversationId, note) {
 /** Create, claim, and seed one immediate run for an answered item. */
 export async function startImmediateRun(deps, bucket, id) {
     const { host, store } = deps;
-    const existing = (await store.list(bucket)).find((item) => item.id === id);
+    let activeBucket = bucket;
+    let existing = (await store.list(activeBucket)).find((item) => item.id === id);
     if (existing === undefined)
         return undefined;
     const job = existing.source.jobId === undefined
         ? undefined
         : await host.jobs.get(existing.source.jobId);
+    if (job !== undefined && job.owner !== existing.owner) {
+        const target = await bucketFor(host, job.owner);
+        await transferItems(store, activeBucket, target, new Set([id]), deps.now?.() ?? new Date());
+        activeBucket = target;
+        existing = (await store.list(activeBucket)).find((item) => item.id === id);
+        if (existing === undefined)
+            return undefined;
+    }
     let conversationId;
     try {
         conversationId = await host.conversations.create({
@@ -73,14 +83,14 @@ export async function startImmediateRun(deps, bucket, id) {
         });
     }
     catch (error) {
-        const reopened = await reopenAnswer(deps, bucket, id, `dispatch failed: ${errorMessage(error)}`);
+        const reopened = await reopenAnswer(deps, activeBucket, id, `dispatch failed: ${errorMessage(error)}`);
         if (reopened !== undefined) {
             await notifyReopened(host, reopened);
             changedInbox(host, reopened.id);
         }
         return undefined;
     }
-    const claimed = await store.update(bucket, (items) => {
+    const claimed = await store.update(activeBucket, (items) => {
         let nextClaim;
         const next = items.map((item) => {
             if (item.id !== id)
@@ -106,7 +116,7 @@ export async function startImmediateRun(deps, bucket, id) {
         return conversationId;
     }
     catch (error) {
-        const released = await releaseClaim(deps, bucket, id, conversationId, `dispatch failed: ${errorMessage(error)}`);
+        const released = await releaseClaim(deps, activeBucket, id, conversationId, `dispatch failed: ${errorMessage(error)}`);
         if (released !== undefined) {
             await notifyReopened(host, released);
             changedInbox(host, released.id);

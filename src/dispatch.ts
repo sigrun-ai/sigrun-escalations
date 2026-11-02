@@ -6,6 +6,7 @@ import { changedInbox } from "./keys.js";
 import { TransitionError, claim, release, reopen } from "./lifecycle.js";
 import { notifyReopened } from "./notify.js";
 import { EscalationStore, bucketFor } from "./store.js";
+import { transferItems } from "./transfer.js";
 import type { Bucket, Escalation } from "./types.js";
 
 export interface DispatchDeps {
@@ -87,11 +88,25 @@ export async function startImmediateRun(
 	id: string,
 ): Promise<number | undefined> {
 	const { host, store } = deps;
-	const existing = (await store.list(bucket)).find((item) => item.id === id);
+	let activeBucket = bucket;
+	let existing = (await store.list(activeBucket)).find((item) => item.id === id);
 	if (existing === undefined) return undefined;
 	const job = existing.source.jobId === undefined
 		? undefined
 		: await host.jobs.get(existing.source.jobId);
+	if (job !== undefined && job.owner !== existing.owner) {
+		const target = await bucketFor(host, job.owner);
+		await transferItems(
+			store,
+			activeBucket,
+			target,
+			new Set([id]),
+			deps.now?.() ?? new Date(),
+		);
+		activeBucket = target;
+		existing = (await store.list(activeBucket)).find((item) => item.id === id);
+		if (existing === undefined) return undefined;
+	}
 	let conversationId;
 	try {
 		conversationId = await host.conversations.create({
@@ -103,7 +118,7 @@ export async function startImmediateRun(
 	} catch (error) {
 		const reopened = await reopenAnswer(
 			deps,
-			bucket,
+			activeBucket,
 			id,
 			`dispatch failed: ${errorMessage(error)}`,
 		);
@@ -114,7 +129,7 @@ export async function startImmediateRun(
 		return undefined;
 	}
 
-	const claimed = await store.update(bucket, (items) => {
+	const claimed = await store.update(activeBucket, (items) => {
 		let nextClaim: Escalation | undefined;
 		const next = items.map((item) => {
 			if (item.id !== id) return item;
@@ -138,7 +153,7 @@ export async function startImmediateRun(
 	} catch (error) {
 		const released = await releaseClaim(
 			deps,
-			bucket,
+			activeBucket,
 			id,
 			conversationId,
 			`dispatch failed: ${errorMessage(error)}`,

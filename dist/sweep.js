@@ -3,10 +3,12 @@
  * cron job every 15 minutes. Pure host calls + store updates: no model,
  * no transcript content.
  *
- * Per bucket, ONE store.update: end due snoozes, orphan items whose job
- * was deleted, release claims older than 24h, and prune resolved items
- * older than 90 days. Job lookups are PREFETCHED before entering the
- * update so the bucket queue is never held across harness reads.
+ * Job transfers first copy their items to the current owner's bucket,
+ * then remove them from the source. Each remaining source bucket gets ONE
+ * lifecycle update: end due snoozes, orphan items whose job was deleted,
+ * release claims older than 24h, and prune resolved items older than 90
+ * days. Job lookups are PREFETCHED before entering updates so no bucket
+ * queue is held across harness reads.
  * Notifications and inbox-change signals fire AFTER the update, for
  * reopened/orphaned items only. A failing bucket lands in `errors` and
  * the sweep continues to the next bucket.
@@ -15,7 +17,8 @@ import { defineTask } from "@earendil-works/pi-durable";
 import { changedInbox } from "./keys.js";
 import { endSnooze, orphan, release } from "./lifecycle.js";
 import { notifyOrphaned, notifyReopened } from "./notify.js";
-import { allBuckets } from "./store.js";
+import { allBuckets, bucketFor } from "./store.js";
+import { transferItems } from "./transfer.js";
 /** The registered task kind; the cron job's action names it. */
 export const SWEEP_TASK_NAME = "escalations.sweep";
 /** The 15-minute cron job the factory declares. */
@@ -41,12 +44,21 @@ async function planSweep(deps, bucket) {
         const jobId = jobIdOf(item);
         if (jobId === undefined || jobs.has(jobId))
             continue;
-        const job = await deps.host.jobs.get(jobId);
-        jobs.set(jobId, job !== undefined);
+        jobs.set(jobId, await deps.host.jobs.get(jobId));
     }
-    return { jobs };
+    return { items, jobs };
 }
-/** One atomic update per bucket: the four lifecycle phases in order. */
+/** Reconcile job-owned items into the buckets of their jobs' current owners. */
+async function migrateTransferredJobs(deps, bucket, plan, now) {
+    const owner = bucket.kind === "user" ? bucket.user : undefined;
+    for (const [jobId, job] of plan.jobs) {
+        if (job === undefined || job.owner === owner)
+            continue;
+        const ids = new Set(plan.items.filter((item) => jobIdOf(item) === jobId).map((item) => item.id));
+        await transferItems(deps.store, bucket, await bucketFor(deps.host, job.owner), ids, now);
+    }
+}
+/** One atomic lifecycle update per source bucket: the four phases in order. */
 async function sweepBucket(deps, bucket, plan, now) {
     const reopened = [];
     const orphaned = [];
@@ -71,7 +83,7 @@ async function sweepBucket(deps, bucket, plan, now) {
             }
             // 2. Orphan items whose job no longer exists.
             const jobId = jobIdOf(current);
-            if (jobId !== undefined && plan.jobs.get(jobId) === false) {
+            if (jobId !== undefined && plan.jobs.get(jobId) === undefined) {
                 const nextOrphan = orphan(current, now);
                 if (nextOrphan !== current) {
                     current = nextOrphan;
@@ -105,6 +117,7 @@ export async function runSweep(deps) {
     for (const bucket of await allBuckets(deps.host)) {
         try {
             const plan = await planSweep(deps, bucket);
+            await migrateTransferredJobs(deps, bucket, plan, now);
             const outcome = await sweepBucket(deps, bucket, plan, now);
             report.snoozesEnded += outcome.report.snoozesEnded;
             report.orphaned += outcome.report.orphaned;

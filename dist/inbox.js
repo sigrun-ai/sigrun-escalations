@@ -537,8 +537,8 @@ export function createInboxView(deps) {
                         return { toast: "Answer sent — started a run" };
                     }
                     // The run could not start: the item reopened (dispatch's
-                    // contract); the plain toast reflects no run was started.
-                    return { toast: "Answer sent" };
+                    // contract), so never imply that a run is executing.
+                    return { toast: "Answer sent — no run started; it will reopen" };
                 }
                 return { toast: "Answer sent" };
             }),
