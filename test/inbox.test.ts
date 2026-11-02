@@ -485,6 +485,22 @@ describe("inbox actions", () => {
 		expect(host.calls.some((call) => call.method === "conversations.create")).toBe(false);
 	});
 
+	test("detail-form answer with no payload itemId resolves from ctx.params.id", async () => {
+		const { store, view } = await rig();
+		const item = await seed(store, ALICE, { key: "disk:/srv/a" });
+		// The real webui's form submit carries {values, rev} only; the item
+		// comes from the detail instance's params, exactly like render.
+		const result = await act(view, ctxOf("alice", { id: item.id }), "answer", {
+			values: { option: "retry" },
+			rev: 0,
+		});
+		expect(result).toMatchObject({ ok: true, toast: "Answer sent" });
+		const stored = (await store.list(ALICE)).find((row) => row.id === item.id)!;
+		expect(stored.status).toBe("answered");
+		expect(stored.answer?.option).toBe("retry");
+		expect(stored.answer?.by).toBe("alice");
+	});
+
 	test("answer on an orphaned item rejects", async () => {
 		const { store, view } = await rig();
 		const item = await seed(store, ALICE, { key: "disk:/srv/a", orphaned: true });

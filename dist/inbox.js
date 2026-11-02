@@ -383,7 +383,10 @@ export function createInboxView(deps) {
     }
     /** The shared action preamble: resolve the item inside the caller's buckets. */
     async function visibleItem(ctx, payload) {
-        const id = itemIdOf(payload);
+        // Activation/bulk payloads carry {itemId}; detail forms and page
+        // submits carry only {values, rev}, so the instance params name it.
+        const id = itemIdOf(payload) ??
+            (typeof ctx.params.id === "string" ? ctx.params.id : undefined);
         if (id === undefined)
             return undefined;
         const buckets = await bucketsVisibleTo(host, ctx.principal);
