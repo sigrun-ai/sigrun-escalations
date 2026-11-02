@@ -170,27 +170,36 @@ describe("tool contracts", () => {
 		for (const result of [raised, listed, resolved]) expect(result.isError).toBeUndefined();
 	});
 
-	it("rejects a malformed option id and nine options through the real argument validator", async () => {
+	it("enforces option and note bounds through the real argument validator", async () => {
 		const { tools } = await rig();
 		const escalate = tools[0] as ToolRegistration;
-		for (const args of [
+		const resolveTool = tools[2] as ToolRegistration;
+		const validate = (tool: ToolRegistration, args: Record<string, unknown>) => () =>
+			validateToolArguments(tool, {
+				id: "call-1",
+				name: tool.name,
+				type: "toolCall",
+				arguments: args as Parameters<typeof validateToolArguments>[1]["arguments"],
+			});
+		const invalidEscalations = [
 			escalationArgs({ options: [{ id: "Bad Id", label: "Bad" }] }),
+			escalationArgs({ options: [{ id: "Retry.A", label: "Bad" }] }),
 			escalationArgs({
 				options: Array.from({ length: 9 }, (_, index) => ({
 					id: `option-${index}`,
 					label: `Option ${index}`,
 				})),
 			}),
-		]) {
-			expect(() =>
-				validateToolArguments(escalate, {
-					id: "call-1",
-					name: "escalate",
-					type: "toolCall",
-					arguments: args as Parameters<typeof validateToolArguments>[1]["arguments"],
-				}),
-			).toThrow(/Validation failed for tool "escalate"/);
+		];
+		for (const args of invalidEscalations) {
+			expect(validate(escalate, args)).toThrow(/Validation failed for tool "escalate"/);
 		}
+
+		const resolution = (note: string) => ({ id: "act-1", outcome: "done", note });
+		expect(validate(resolveTool, resolution("x".repeat(4001)))).toThrow(
+			/Validation failed for tool "escalation_resolve"/,
+		);
+		expect(validate(resolveTool, resolution("x".repeat(4000)))).not.toThrow();
 	});
 });
 

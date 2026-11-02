@@ -21,7 +21,7 @@ const OptionSchema = Type.Object({
 	id: Type.String({
 		minLength: 1,
 		maxLength: 64,
-		pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+		pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
 	}),
 	label: Type.String({ minLength: 1, maxLength: 200 }),
 	detail: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -251,7 +251,7 @@ export function createTools(deps: ToolDeps): ToolRegistration[] {
 		parameters: Type.Object({
 			id: Type.String({ minLength: 1 }),
 			outcome: Type.Union([Type.Literal("done"), Type.Literal("failed")]),
-			note: Type.String({ minLength: 1, maxLength: 2000 }),
+			note: Type.String({ minLength: 1, maxLength: 4000 }),
 		}),
 		replay: "safe",
 		structuredOutputSchema: Type.Object({
