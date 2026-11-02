@@ -3,23 +3,25 @@ import type { Principal, SigrunHost } from "@sigrun/sigrun/extension";
 import { JsonFile } from "./json-file.js";
 import type { Bucket, Escalation } from "./types.js";
 
+/** Durable per-bucket escalation storage. */
 export class EscalationStore {
-	// One JsonFile (and therefore one serialization queue) per bucket path.
-	// Creating an instance per call would allow lost concurrent updates.
+	// One JsonFile per path is essential: its serialization queue is per
+	// instance, so constructing one per update would permit lost updates.
 	private readonly files = new Map<string, JsonFile<Escalation[]>>();
 
 	constructor(private readonly host: SigrunHost) {}
 
 	fileOf(bucket: Bucket): string {
-		const data =
+		return join(
 			bucket.kind === "user"
 				? this.host.stores.user(bucket.user).paths.data
-				: this.host.stores.paths.data;
-		return join(data, "escalations.json");
+				: this.host.stores.paths.data,
+			"escalations.json",
+		);
 	}
 
 	list(bucket: Bucket): Promise<Escalation[]> {
-		return this.file(bucket).read();
+		return this.fileFor(bucket).read();
 	}
 
 	async update<T>(
@@ -27,15 +29,16 @@ export class EscalationStore {
 		fn: (items: Escalation[]) => { items: Escalation[]; result: T },
 	): Promise<T> {
 		let result!: T;
-		await this.file(bucket).update((items) => {
+		await this.fileFor(bucket).update((items) => {
 			const next = fn(items);
 			result = next.result;
+			// JsonFile treats an unchanged array reference as the no-write fast path.
 			return next.items;
 		});
 		return result;
 	}
 
-	private file(bucket: Bucket): JsonFile<Escalation[]> {
+	private fileFor(bucket: Bucket): JsonFile<Escalation[]> {
 		const path = this.fileOf(bucket);
 		let file = this.files.get(path);
 		if (file === undefined) {
@@ -53,8 +56,7 @@ export async function bucketFor(
 	if (owner !== undefined && (await host.users.get(owner)) !== undefined) {
 		return { kind: "user", user: owner };
 	}
-	const users = await host.users.list();
-	const primaryAdmin = users.find((user) => user.admin);
+	const primaryAdmin = (await host.users.list()).find((user) => user.admin);
 	return primaryAdmin === undefined
 		? { kind: "shared" }
 		: { kind: "user", user: primaryAdmin.user };
@@ -64,20 +66,19 @@ export async function bucketsVisibleTo(
 	host: SigrunHost,
 	principal: Principal,
 ): Promise<Bucket[]> {
-	if (principal.user === undefined) {
-		// Core's naive-loopback superuser and service token carry no user
-		// (src/server/auth/principal.ts:27-30), so they see the shared bucket.
-		return [{ kind: "shared" }];
-	}
+	// Core's naive-loopback superuser and service token carry no user
+	// (src/server/auth/principal.ts:27-30), so they see the shared bucket.
+	if (principal.user === undefined) return [{ kind: "shared" }];
 	return (await host.users.get(principal.user)) === undefined
 		? []
 		: [{ kind: "user", user: principal.user }];
 }
 
 export async function allBuckets(host: SigrunHost): Promise<Bucket[]> {
-	const users = await host.users.list();
 	return [
-		...users.map((user): Bucket => ({ kind: "user", user: user.user })),
+		...(await host.users.list()).map(
+			(user): Bucket => ({ kind: "user", user: user.user }),
+		),
 		{ kind: "shared" },
 	];
 }
@@ -88,7 +89,7 @@ export async function findVisible(
 	id: string,
 ): Promise<{ bucket: Bucket; item: Escalation } | undefined> {
 	for (const bucket of buckets) {
-		const item = (await store.list(bucket)).find((entry) => entry.id === id);
+		const item = (await store.list(bucket)).find((candidate) => candidate.id === id);
 		if (item !== undefined) return { bucket, item };
 	}
 	return undefined;

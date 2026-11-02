@@ -1,6 +1,11 @@
 /**
- * A serialized, atomically replaced JSON file. The queue belongs to the
- * instance, so callers that share a file must also share its JsonFile.
+ * JsonFile<T> — one serialized, atomically replaced JSON state file.
+ *
+ * Updates run read → mutate → write in one queue position. Writes use a
+ * same-directory temp file and rename, and are always mode 0600. Malformed
+ * JSON throws naming the path rather than being silently reset.
+ *
+ * The queue is PER INSTANCE: users sharing a path must share the JsonFile.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -26,13 +31,13 @@ export class JsonFile<T> {
 	}
 
 	/**
-	 * Read, transform, and conditionally write in one queue position.
-	 * Returning the current value unchanged is a no-write fast path.
+	 * Return the next state from the current one. Returning the same reference
+	 * is a no-op: the read is serialized, but no replacement is written.
 	 */
-	update(transform: (current: T) => T | Promise<T>): Promise<T> {
+	update(mutate: (current: T) => T | Promise<T>): Promise<T> {
 		return this.enqueue(async () => {
 			const current = await this.readNow();
-			const next = await transform(current);
+			const next = await mutate(current);
 			if (next !== current) await this.writeNow(next);
 			return next;
 		});
@@ -40,8 +45,7 @@ export class JsonFile<T> {
 
 	private enqueue<R>(work: () => Promise<R>): Promise<R> {
 		const next = this.queue.then(work, work);
-		// A failed operation must not poison the queue; later work re-reads
-		// the file rather than trusting state from the failed operation.
+		// A rejected operation does not poison later reads or updates.
 		this.queue = next.catch(() => {});
 		return next;
 	}
@@ -77,7 +81,7 @@ export class JsonFile<T> {
 			await rename(temp, this.path);
 		} catch (error) {
 			await rm(temp, { force: true }).catch(() => {
-				// Preserve the original write failure if temp cleanup also fails.
+				// Keep the original write failure if cleanup also fails.
 			});
 			throw error;
 		}
