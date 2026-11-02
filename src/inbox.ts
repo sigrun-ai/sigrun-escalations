@@ -553,7 +553,8 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 			if (id !== undefined) {
 				const found = await findVisible(store, buckets, id);
 				if (found === undefined) {
-					return { tree: notFoundTree(), data: {}, access: "write" };
+					// Nothing here can be acted on, so the page is not writable.
+					return { tree: notFoundTree(), data: {}, access: "none" };
 				}
 				const job = await jobOf(found.item);
 				return {
@@ -614,7 +615,14 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 						),
 					);
 					if (item.onAnswer === "immediate") {
-						const conversationId = await startImmediateRun(deps, bucket, item.id);
+						// Reconstruct the dispatch seam explicitly: passing the view's
+						// deps object would silently satisfy a diverging DispatchDeps
+						// and would not prove the injected now() flows through.
+						const conversationId = await startImmediateRun(
+							{ host: deps.host, store: deps.store, now: deps.now },
+							bucket,
+							item.id,
+						);
 						if (conversationId !== undefined) {
 							return { toast: "Answer sent — started a run" };
 						}

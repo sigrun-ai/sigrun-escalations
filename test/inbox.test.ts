@@ -421,6 +421,8 @@ describe("inbox detail mode", () => {
 		const item = await seed(store, ALICE, { key: "disk:/srv/secret" });
 		const other = await view.render(ctxOf("bob", { id: item.id }));
 		const unknown = await view.render(ctxOf("bob", { id: "nope" }));
+		// The not-found page cannot be acted on: access none, never write.
+		expect(other.access).toBe("none");
 		expect(JSON.stringify(other)).toEqual(JSON.stringify(unknown));
 		expect(JSON.stringify(other.tree)).not.toContain("disk:/srv/secret");
 		expect(JSON.stringify(other.tree)).not.toContain(item.title);
