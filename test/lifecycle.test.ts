@@ -9,6 +9,7 @@ import {
 	orphan,
 	raise,
 	release,
+	reopen,
 	resolve,
 	restore,
 	snooze,
@@ -286,6 +287,29 @@ describe("release", () => {
 			() => release(claimed(), 11, "Wrong conversation", SETTLED_AT),
 			"not_claimed",
 		);
+	});
+});
+
+describe("reopen", () => {
+	it("reopens an answered item, retaining its answer in interruption history", () => {
+		const before = answered();
+		const previousAnswer = before.answer;
+		const after = reopen(before, "dispatch failed: create refused", SETTLED_AT);
+
+		expectTransition(before, after, "interrupted", SETTLED_AT);
+		expect(after.status).toBe("open");
+		expect(after.reopenReason).toBe("interrupted");
+		expect(after.answer).toBeUndefined();
+		expect(after.history.at(-1)).toMatchObject({
+			note: "dispatch failed: create refused",
+			answer: previousAnswer,
+		});
+	});
+
+	it("rejects open, claimed, and dismissed items", () => {
+		for (const before of [opened(), claimed(), dismiss(opened(), SETTLED_AT)]) {
+			expectCode(() => reopen(before, "Not reopenable", SETTLED_AT), "not_reopenable");
+		}
 	});
 });
 

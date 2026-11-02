@@ -136,6 +136,21 @@ export function resolve(
 	);
 }
 
+/** Reopen an unclaimed answer when its immediate action could not start. */
+export function reopen(e: Escalation, note: string, now: Date): Escalation {
+	if (e.status !== "answered") throw new TransitionError("not_reopenable");
+	return changed(
+		e,
+		now,
+		{
+			event: "interrupted",
+			note,
+			...(e.answer === undefined ? {} : { answer: e.answer }),
+		},
+		{ status: "open", answer: undefined, reopenReason: "interrupted" },
+	);
+}
+
 export function release(
 	e: Escalation,
 	conversationId: number,
