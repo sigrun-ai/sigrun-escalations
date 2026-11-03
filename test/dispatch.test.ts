@@ -239,6 +239,12 @@ describe("startImmediateRun", () => {
 		vi.spyOn(host.conversations, "create").mockRejectedValue(new Error("create refused"));
 
 		await expect(startImmediateRun({ host, store }, ALICE, item.id)).resolves.toBeUndefined();
+		// Pin the full reopened shape, not just the history note: the
+		// item must be back open with its interruption labelled.
+		expect((await store.list(ALICE))[0]).toMatchObject({
+			status: "open",
+			reopenReason: "interrupted",
+		});
 		expect((await store.list(ALICE))[0]?.history.at(-1)).toMatchObject({
 			note: "dispatch failed: create refused",
 		});
@@ -301,6 +307,14 @@ describe("seedText", () => {
 	it("renders an absent source as none", () => {
 		const item = answer({ ...immediate("act-1"), source: {} }, { option: "retry" }, NOW);
 		expect(seedText(item)).toContain("\nSource: none\n");
+	});
+
+	it("renders a deleted job as its bare id", () => {
+		// The job is gone by the time the answer is dispatched, so no name
+		// lookup exists: the raw id is the only honest label.
+		const item = answer(immediate("act-1"), { option: "retry" }, NOW);
+		expect(seedText(item)).toContain('\nSource: job "api:1"\n');
+		expect(seedText(item)).not.toContain('job "api:1" (api:1)');
 	});
 });
 
