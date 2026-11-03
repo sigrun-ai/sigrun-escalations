@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension";
+import type { MemoryEventApi, HandlerContext } from "@sigrun/sigrun/extension";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import createEscalations from "../src/index.js";
 import { dismiss, raise } from "../src/lifecycle.js";
@@ -119,13 +120,39 @@ async function stored(host: FakeHost, user: string): Promise<Escalation[]> {
 	return JSON.parse(await readFile(path, "utf8")) as Escalation[];
 }
 
+const unusedApi = {} as MemoryEventApi;
+const unusedContext: HandlerContext = { abortSignal: undefined };
+
 async function deleteUser(result: SigrunExtensionResult): Promise<void> {
 	await result.userDeleted?.(
 		{ user: "alice", transferTo: "bob" },
-		undefined as never,
-		undefined as never,
+		unusedApi,
+		unusedContext,
 	);
 }
+
+it("userDeleted stamps the transfer history with the injected clock", async () => {
+	const host = await createFakeHost({
+		users: [
+			{ user: "alice", admin: false },
+			{ user: "bob", admin: false },
+		],
+	});
+	hosts.push(host);
+	const result = createEscalations(host, { now: () => NOW });
+	const store = wiring.stores[0] as EscalationStore;
+	await seedAlice(store);
+
+	await deleteUser(result);
+
+	for (const entry of await stored(host, "bob")) {
+		expect(entry.history.at(-1)).toEqual({
+			at: NOW.toISOString(),
+			event: "transferred",
+			note: "transferred from alice",
+		});
+	}
+});
 
 beforeEach(() => {
 	for (const entries of Object.values(wiring)) entries.length = 0;

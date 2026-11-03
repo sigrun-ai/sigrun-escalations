@@ -5,4 +5,4 @@ import type { Bucket } from "./types.js";
  * A crash between the updates leaves duplicates; the id check makes retrying
  * the copy idempotent, so a later delivery can finish without losing items.
  */
-export declare function transferItems(store: EscalationStore, source: Bucket, target: Bucket, ids: ReadonlySet<string>, now: Date): Promise<void>;
+export declare function transferItems(store: EscalationStore, source: Bucket, target: Bucket, ids: ReadonlySet<string>, now: Date): Promise<readonly string[]>;

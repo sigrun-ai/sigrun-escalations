@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { answer, claim, raise, snooze } from "../src/lifecycle.js";
 import { EscalationStore } from "../src/store.js";
 import { SWEEP_JOB, SWEEP_TASK_NAME, runSweep } from "../src/sweep.js";
+import { transferItems } from "../src/transfer.js";
 import type { Bucket, Escalation } from "../src/types.js";
 import {
 	createFakeHost,
@@ -209,6 +210,48 @@ describe("runSweep", () => {
 		expect(calls(host, "jobs.get")[0]?.args).toEqual(["nightly-check"]);
 	});
 
+	it("looks up a job once per sweep when its items span two buckets", async () => {
+		// The dedup cache is sweep-wide, not per-bucket: host.jobs.get is
+		// idempotent, so a job with items in both alice's and the shared
+		// bucket is resolved exactly once.
+		const host = await fakeHost({
+			users: [{ user: "alice", admin: false }],
+			jobs: { "nightly-check": job() },
+		});
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("alice-item")]);
+		await seed(store, { kind: "shared" }, [item("shared-item")]);
+
+		await runSweep({ host, store, now: () => NOW });
+		expect(calls(host, "jobs.get").map((call) => call.args[0])).toEqual([
+			"nightly-check",
+		]);
+	});
+
+	it("stops between buckets when the abort signal has fired", async () => {
+		const host = await fakeHost({
+			users: [{ user: "alice", admin: false }],
+			jobs: { "nightly-check": job() },
+		});
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("first")]);
+		await seed(store, { kind: "shared" }, [item("second")]);
+		const controller = new AbortController();
+		controller.abort();
+
+		const report = await runSweep({
+			host,
+			store,
+			now: () => NOW,
+			signal: controller.signal,
+		});
+		expect(report.stops).toBe(2);
+		expect(report.errors).toEqual([]);
+		// Nothing was swept: both buckets keep their items.
+		expect(await store.list(ALICE)).toHaveLength(1);
+		expect(await store.list({ kind: "shared" })).toHaveLength(1);
+	});
+
 	it("prefetches jobs.get before entering the bucket update", async () => {
 		const host = await fakeHost({
 			users: [{ user: "alice", admin: false }],
@@ -283,6 +326,19 @@ describe("runSweep", () => {
 
 		expect((await store.list(ALICE)).map((e) => e.id)).toEqual(["recent"]);
 		expect(report).toMatchObject({ pruned: 1 });
+	});
+
+	it("a same-bucket transfer is a no-op", async () => {
+		// bucketFor can never produce this (a job's owner resolves to its
+		// own bucket), but direct callers must not copy-and-delete within
+		// one bucket.
+		const host = await fakeHost();
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("first")]);
+
+		const moved = await transferItems(store, ALICE, ALICE, new Set(["first"]), NOW);
+		expect(moved).toEqual([]);
+		expect((await store.list(ALICE)).map((e) => e.id)).toEqual(["first"]);
 	});
 
 	it("reports a corrupt bucket in errors and still sweeps the other bucket", async () => {

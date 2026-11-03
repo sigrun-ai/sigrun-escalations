@@ -37,26 +37,38 @@ function jobIdOf(e) {
         : undefined;
 }
 /** Read-only planning pass: which jobs exist. Never holds the bucket queue. */
-async function planSweep(deps, bucket) {
+async function planSweep(deps, bucket, cache) {
     const items = await deps.store.list(bucket);
     const jobs = new Map();
     for (const item of items) {
         const jobId = jobIdOf(item);
         if (jobId === undefined || jobs.has(jobId))
             continue;
-        jobs.set(jobId, await deps.host.jobs.get(jobId));
+        // The cache is sweep-wide: a job that spans two buckets is looked
+        // up once, since host.jobs.get is idempotent.
+        const cached = cache.get(jobId);
+        if (cached !== undefined || cache.has(jobId)) {
+            jobs.set(jobId, cached);
+            continue;
+        }
+        const job = await deps.host.jobs.get(jobId);
+        cache.set(jobId, job);
+        jobs.set(jobId, job);
     }
     return { items, jobs };
 }
 /** Reconcile job-owned items into the buckets of their jobs' current owners. */
 async function migrateTransferredJobs(deps, bucket, plan, now) {
     const owner = bucket.kind === "user" ? bucket.user : undefined;
+    const moved = [];
     for (const [jobId, job] of plan.jobs) {
         if (job === undefined || job.owner === owner)
             continue;
         const ids = new Set(plan.items.filter((item) => jobIdOf(item) === jobId).map((item) => item.id));
-        await transferItems(deps.store, bucket, await bucketFor(deps.host, job.owner), ids, now);
+        const transferred = await transferItems(deps.store, bucket, await bucketFor(deps.host, job.owner), ids, now);
+        moved.push(...transferred);
     }
+    return moved;
 }
 /** One atomic lifecycle update per source bucket: the four phases in order. */
 async function sweepBucket(deps, bucket, plan, now) {
@@ -114,10 +126,18 @@ export async function runSweep(deps) {
         pruned: 0,
         errors: [],
     };
+    const jobs = new Map();
     for (const bucket of await allBuckets(deps.host)) {
+        if (deps.signal?.aborted === true) {
+            // Cooperative stop: the harness is closing or the task was
+            // aborted; the next 15-minute tick sweeps the rest. `stops`
+            // is set only on a real stop, keeping the base report shape.
+            report.stops = (report.stops ?? 0) + 1;
+            continue;
+        }
         try {
-            const plan = await planSweep(deps, bucket);
-            await migrateTransferredJobs(deps, bucket, plan, now);
+            const plan = await planSweep(deps, bucket, jobs);
+            const moved = await migrateTransferredJobs(deps, bucket, plan, now);
             const outcome = await sweepBucket(deps, bucket, plan, now);
             report.snoozesEnded += outcome.report.snoozesEnded;
             report.orphaned += outcome.report.orphaned;
@@ -132,6 +152,10 @@ export async function runSweep(deps) {
                 await notifyOrphaned(deps.host, item);
                 changedInbox(deps.host, item.id);
             }
+            // Migrated items changed bucket contents like a deletion does;
+            // wake the inbox instances so the moved items render at once.
+            for (const id of moved)
+                changedInbox(deps.host, id);
         }
         catch (error) {
             const path = deps.store.fileOf(bucket);
@@ -150,7 +174,7 @@ export function createSweepTask(deps) {
         initial: () => ({ phase: "sweep" }),
         phases: {
             sweep: async (_task, runtime, context) => {
-                await runSweep(deps);
+                await runSweep({ ...deps, signal: runtime.signal });
                 // REQUIRED: a phase returning without durable progress faults the
                 // task. The sweep's bookkeeping lives in the store files; the
                 // task's own terminal outcome is the durable progress.

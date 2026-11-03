@@ -1,6 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import {
 	defineTool,
+	type ConversationId,
 	type ToolExecutionResult,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -88,10 +89,8 @@ function listText(skip: readonly string[], act: readonly Escalation[]): string {
 /** Build the three host-identity-derived escalation tools over one store. */
 export function createTools(deps: ToolDeps): ToolRegistration[] {
 	const now = deps.now ?? (() => new Date());
-	const caller = async (conversationId: number) => {
-		const meta = await deps.host.conversations.meta(
-			conversationId as Parameters<SigrunHost["conversations"]["meta"]>[0],
-		);
+	const caller = async (conversationId: ConversationId) => {
+		const meta = await deps.host.conversations.meta(conversationId);
 		return {
 			meta,
 			namespace: meta.jobId === undefined ? "user" : `job:${meta.jobId}`,
@@ -265,11 +264,14 @@ export function createTools(deps: ToolDeps): ToolRegistration[] {
 				const item = await deps.store.update(bucket, (items) => {
 					const index = items.findIndex((candidate) => candidate.id === args.id);
 					if (index < 0) throw new TransitionError("not_found");
-					const resolved = resolve(items[index] as Escalation, api.conversationId, args.outcome, args.note, now());
+					const resolved = resolve(items[index]!, api.conversationId, args.outcome, args.note, now());
 					const next = [...items];
 					next[index] = resolved;
 					return { items: next, result: resolved };
 				});
+				// The model reads these texts; keep them pinned in sync with
+				// the exact seedText expectation in dispatch.test.ts, which
+				// names escalation_resolve as the resolution path.
 				if (args.outcome === "failed") await notifyReopened(deps.host, item);
 				changedInbox(deps.host, item.id);
 				return {

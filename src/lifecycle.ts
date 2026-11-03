@@ -112,11 +112,13 @@ export function resolve(
 		throw new TransitionError("wrong_claimant");
 	}
 	if (outcome === "done") {
+		// Forward transition: the stale reopen badge must not survive onto
+		// the terminal resolved state (inbox.ts renders it as a warn badge).
 		return changed(
 			e,
 			now,
 			{ event: "resolved", note },
-			{ status: "resolved", resolvedAt: now.toISOString() },
+			{ status: "resolved", resolvedAt: now.toISOString(), reopenReason: undefined },
 		);
 	}
 	return changed(
@@ -181,12 +183,12 @@ export function dismiss(e: Escalation, now: Date): Escalation {
 	if (e.status !== "open" && e.status !== "answered") {
 		throw new TransitionError("not_dismissable");
 	}
-	return changed(e, now, { event: "dismissed" }, { status: "dismissed", answer: undefined });
+	return changed(e, now, { event: "dismissed" }, { status: "dismissed", answer: undefined, reopenReason: undefined });
 }
 
 export function restore(e: Escalation, now: Date): Escalation {
 	if (e.status !== "dismissed") throw new TransitionError("not_dismissed");
-	return changed(e, now, { event: "restored" }, { status: "open" });
+	return changed(e, now, { event: "restored" }, { status: "open", reopenReason: undefined });
 }
 
 export function snooze(e: Escalation, days: number, now: Date): Escalation {
