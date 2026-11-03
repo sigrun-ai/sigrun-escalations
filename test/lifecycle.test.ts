@@ -229,6 +229,21 @@ describe("resolve", () => {
 		expect(after.history.at(-1)?.note).toBe("The check passed");
 	});
 
+	it("clears reopenReason when resolving an item that was reopened", () => {
+		// A resolved item is terminal: the stale "failed" badge must not
+		// survive onto it (inbox.ts:239 renders it as a warn badge).
+		const failedOnce = resolve(claimed(), 10, "failed", "The retry failed", SETTLED_AT);
+		const before = claim(
+			answer(failedOnce, { option: "retry", by: "alice" }, SETTLED_AT),
+			10,
+			SETTLED_AT,
+		);
+		const after = resolve(before, 10, "done", "The retry succeeded", SETTLED_AT);
+
+		expect(after.status).toBe("resolved");
+		expect(after.reopenReason).toBeUndefined();
+	});
+
 	it("reopens a failed claim, clearing the answer but retaining it in history", () => {
 		const before = claimed();
 		const previousAnswer = before.answer;
@@ -324,6 +339,19 @@ describe("dismiss and restore", () => {
 
 	it("dismisses an answered item and clears its answer", () => {
 		expect(dismiss(answered(), SETTLED_AT).answer).toBeUndefined();
+	});
+
+	it("clears reopenReason when dismissing or restoring a reopened item", () => {
+		const reopenedItem = {
+			...opened(),
+			reopenReason: "failed" as const,
+		};
+		const dismissed = dismiss(reopenedItem, SETTLED_AT);
+		expect(dismissed.reopenReason).toBeUndefined();
+
+		const restored = restore(dismissed, SETTLED_AT);
+		expect(restored.status).toBe("open");
+		expect(restored.reopenReason).toBeUndefined();
 	});
 
 	it("allows an orphaned item to be dismissed", () => {
