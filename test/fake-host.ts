@@ -108,6 +108,15 @@ export async function createFakeHost(
 			record("conversations.meta", id);
 			return metas.get(id) ?? emptyMeta();
 		},
+		entries: async (id, query, limit, cursor) => {
+			record("conversations.entries", id, query, limit, cursor);
+			// Recording stub: tests that need entries pass their own host.
+			return { items: [] };
+		},
+		entry: async (id, entryId) => {
+			record("conversations.entry", id, entryId);
+			return undefined;
+		},
 		watch: notUsed(),
 		list: notUsed(),
 		abort: notUsed(),
