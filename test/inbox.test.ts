@@ -446,6 +446,22 @@ describe("inbox actions", () => {
 		});
 	});
 
+	test("an empty-string instruction is dropped before the lifecycle check", async () => {
+		// The view collapses "" to undefined; with an option present the
+		// answer succeeds and stores no instruction, rather than tripping
+		// empty_answer inside the lifecycle.
+		const { store, view } = await rig();
+		const item = await seed(store, ALICE, { key: "disk:/srv/a" });
+		const result = await act(view, ctxOf("alice"), "answer", {
+			itemId: item.id,
+			values: { option: "retry", instruction: "" },
+		});
+		expect(result).toMatchObject({ ok: true });
+		const stored = (await store.list(ALICE)).find((row) => row.id === item.id)!;
+		expect(stored.answer?.option).toBe("retry");
+		expect(stored.answer?.instruction).toBeUndefined();
+	});
+
 	test("answer on an immediate item: answered then claimed by the created conversation; toast names the run", async () => {
 		const { host, store, view } = await rig();
 		const item = await seed(store, ALICE, { key: "disk:/srv/a", onAnswer: "immediate" });
@@ -575,7 +591,7 @@ describe("inbox actions", () => {
 			ids: [item.id, "nope"],
 			values: { ignored: true },
 		});
-		expect(result).toMatchObject({ ok: true });
+		expect(result).toMatchObject({ ok: true, toast: "Dismissed 1 escalation" });
 		const rows = await store.list(ALICE);
 		expect(rows.find((row) => row.id === item.id)?.status).toBe("dismissed");
 		expect(rows).toHaveLength(1);
@@ -583,8 +599,23 @@ describe("inbox actions", () => {
 		const restored = await act(view, ctxOf("alice"), "restore-many", {
 			ids: [item.id, "nope"],
 		});
-		expect(restored).toMatchObject({ ok: true });
+		expect(restored).toMatchObject({ ok: true, toast: "Restored 1 escalation" });
 		expect((await store.list(ALICE))[0]?.status).toBe("open");
+	});
+
+	test("the bulk toast pluralizes", async () => {
+		const { store, view } = await rig();
+		const one = await seed(store, ALICE, { key: "disk:/srv/a" });
+		const two = await seed(store, ALICE, { key: "disk:/srv/b" });
+		const result = await act(view, ctxOf("alice"), "dismiss-many", {
+			ids: [one.id, two.id],
+		});
+		expect(result).toMatchObject({ ok: true, toast: "Dismissed 2 escalations" });
+
+		const restored = await act(view, ctxOf("alice"), "restore-many", {
+			ids: [one.id, two.id],
+		});
+		expect(restored).toMatchObject({ ok: true, toast: "Restored 2 escalations" });
 	});
 
 	test("a second dismiss rejects with a readable TransitionError message", async () => {
@@ -593,5 +624,24 @@ describe("inbox actions", () => {
 		const result = await act(view, ctxOf("alice"), "dismiss", { itemId: item.id });
 		expect(result.ok).toBe(false);
 		expect(JSON.stringify(result)).not.toContain("not_dismissable");
+	});
+
+	test("an item vanished between findVisible and update reads as not found, not a raw error", async () => {
+		const { store, view } = await rig();
+		const item = await seed(store, ALICE, { key: "disk:/srv/a" });
+		// Simulate the race: the read sees the item, the update does not.
+		const update = store.update.bind(store);
+		let removed = false;
+		vi.spyOn(store, "update").mockImplementation(async (bucket, fn) => {
+			return await update(bucket, (items) => {
+				const visible = removed ? items : items.filter((row) => row.id !== item.id);
+				removed = true;
+				return fn(visible);
+			});
+		});
+
+		const result = await act(view, ctxOf("alice"), "dismiss", { itemId: item.id });
+		expect(result).toEqual({ ok: false, error: { message: "Escalation not found" } });
+		expect(JSON.stringify(result)).not.toContain("not_found");
 	});
 });
