@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { answer, claim, raise, snooze } from "../src/lifecycle.js";
 import { EscalationStore } from "../src/store.js";
 import { SWEEP_JOB, SWEEP_TASK_NAME, runSweep } from "../src/sweep.js";
+import { transferItems } from "../src/transfer.js";
 import type { Bucket, Escalation } from "../src/types.js";
 import {
 	createFakeHost,
@@ -325,6 +326,19 @@ describe("runSweep", () => {
 
 		expect((await store.list(ALICE)).map((e) => e.id)).toEqual(["recent"]);
 		expect(report).toMatchObject({ pruned: 1 });
+	});
+
+	it("a same-bucket transfer is a no-op", async () => {
+		// bucketFor can never produce this (a job's owner resolves to its
+		// own bucket), but direct callers must not copy-and-delete within
+		// one bucket.
+		const host = await fakeHost();
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("first")]);
+
+		const moved = await transferItems(store, ALICE, ALICE, new Set(["first"]), NOW);
+		expect(moved).toEqual([]);
+		expect((await store.list(ALICE)).map((e) => e.id)).toEqual(["first"]);
 	});
 
 	it("reports a corrupt bucket in errors and still sweeps the other bucket", async () => {

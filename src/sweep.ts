@@ -99,15 +99,18 @@ async function migrateTransferredJobs(
 	bucket: Bucket,
 	plan: BucketPlan,
 	now: Date,
-): Promise<void> {
+): Promise<readonly string[]> {
 	const owner = bucket.kind === "user" ? bucket.user : undefined;
+	const moved: string[] = [];
 	for (const [jobId, job] of plan.jobs) {
 		if (job === undefined || job.owner === owner) continue;
 		const ids = new Set(
 			plan.items.filter((item) => jobIdOf(item) === jobId).map((item) => item.id),
 		);
-		await transferItems(deps.store, bucket, await bucketFor(deps.host, job.owner), ids, now);
+		const transferred = await transferItems(deps.store, bucket, await bucketFor(deps.host, job.owner), ids, now);
+		moved.push(...transferred);
 	}
+	return moved;
 }
 
 /** One atomic lifecycle update per source bucket: the four phases in order. */
@@ -192,7 +195,7 @@ export async function runSweep(deps: SweepDeps): Promise<SweepReport> {
 		}
 		try {
 			const plan = await planSweep(deps, bucket, jobs);
-			await migrateTransferredJobs(deps, bucket, plan, now);
+			const moved = await migrateTransferredJobs(deps, bucket, plan, now);
 			const outcome = await sweepBucket(deps, bucket, plan, now);
 			report.snoozesEnded += outcome.report.snoozesEnded;
 			report.orphaned += outcome.report.orphaned;
@@ -208,6 +211,9 @@ export async function runSweep(deps: SweepDeps): Promise<SweepReport> {
 				await notifyOrphaned(deps.host, item);
 				changedInbox(deps.host, item.id);
 			}
+			// Migrated items changed bucket contents like a deletion does;
+			// wake the inbox instances so the moved items render at once.
+			for (const id of moved) changedInbox(deps.host, id);
 		} catch (error) {
 			const path = deps.store.fileOf(bucket);
 			const message = error instanceof Error ? error.message : String(error);

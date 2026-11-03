@@ -12,10 +12,19 @@ export async function transferItems(
 	target: Bucket,
 	ids: ReadonlySet<string>,
 	now: Date,
-): Promise<void> {
-	if (ids.size === 0) return;
+): Promise<readonly string[]> {
+	// Same-bucket transfer is a no-op; unreachable through bucketFor (a
+	// job's owner resolves to its own bucket), but the guard keeps the
+	// copy-then-remove shape honest for direct callers.
+	if (
+		(source.kind === "shared" && target.kind === "shared") ||
+		(source.kind === "user" && target.kind === "user" && source.user === target.user)
+	) {
+		return [];
+	}
+	if (ids.size === 0) return [];
 	const sourceItems = (await store.list(source)).filter((item) => ids.has(item.id));
-	if (sourceItems.length === 0) return;
+	if (sourceItems.length === 0) return [];
 	const sourceOwner = source.kind === "user" ? source.user : "shared";
 	const targetOwner = target.kind === "user" ? target.user : undefined;
 
@@ -46,4 +55,5 @@ export async function transferItems(
 		items: items.filter((item) => !idsInTarget.has(item.id)),
 		result: undefined,
 	}));
+	return [...idsInTarget].filter((id) => ids.has(id));
 }
