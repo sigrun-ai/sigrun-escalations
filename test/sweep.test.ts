@@ -209,6 +209,48 @@ describe("runSweep", () => {
 		expect(calls(host, "jobs.get")[0]?.args).toEqual(["nightly-check"]);
 	});
 
+	it("looks up a job once per sweep when its items span two buckets", async () => {
+		// The dedup cache is sweep-wide, not per-bucket: host.jobs.get is
+		// idempotent, so a job with items in both alice's and the shared
+		// bucket is resolved exactly once.
+		const host = await fakeHost({
+			users: [{ user: "alice", admin: false }],
+			jobs: { "nightly-check": job() },
+		});
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("alice-item")]);
+		await seed(store, { kind: "shared" }, [item("shared-item")]);
+
+		await runSweep({ host, store, now: () => NOW });
+		expect(calls(host, "jobs.get").map((call) => call.args[0])).toEqual([
+			"nightly-check",
+		]);
+	});
+
+	it("stops between buckets when the abort signal has fired", async () => {
+		const host = await fakeHost({
+			users: [{ user: "alice", admin: false }],
+			jobs: { "nightly-check": job() },
+		});
+		const store = new EscalationStore(host);
+		await seed(store, ALICE, [item("first")]);
+		await seed(store, { kind: "shared" }, [item("second")]);
+		const controller = new AbortController();
+		controller.abort();
+
+		const report = await runSweep({
+			host,
+			store,
+			now: () => NOW,
+			signal: controller.signal,
+		});
+		expect(report.stops).toBe(2);
+		expect(report.errors).toEqual([]);
+		// Nothing was swept: both buckets keep their items.
+		expect(await store.list(ALICE)).toHaveLength(1);
+		expect(await store.list({ kind: "shared" })).toHaveLength(1);
+	});
+
 	it("prefetches jobs.get before entering the bucket update", async () => {
 		const host = await fakeHost({
 			users: [{ user: "alice", admin: false }],

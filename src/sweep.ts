@@ -44,12 +44,16 @@ export interface SweepReport {
 	claimsExpired: number;
 	pruned: number;
 	errors: string[];
+	/** Buckets skipped after the abort signal fired. */
+	stops?: number;
 }
 
 export interface SweepDeps {
 	readonly host: SigrunHost;
 	readonly store: EscalationStore;
 	readonly now?: () => Date;
+	/** Cooperative cancellation, checked between buckets (the task phase passes the invocation's runtime.signal). */
+	readonly signal?: AbortSignal;
 }
 
 function jobIdOf(e: Escalation): string | undefined {
@@ -65,13 +69,26 @@ interface BucketPlan {
 }
 
 /** Read-only planning pass: which jobs exist. Never holds the bucket queue. */
-async function planSweep(deps: SweepDeps, bucket: Bucket): Promise<BucketPlan> {
+async function planSweep(
+	deps: SweepDeps,
+	bucket: Bucket,
+	cache: Map<string, HostJobInfo | undefined>,
+): Promise<BucketPlan> {
 	const items = await deps.store.list(bucket);
 	const jobs = new Map<string, HostJobInfo | undefined>();
 	for (const item of items) {
 		const jobId = jobIdOf(item);
 		if (jobId === undefined || jobs.has(jobId)) continue;
-		jobs.set(jobId, await deps.host.jobs.get(jobId));
+		// The cache is sweep-wide: a job that spans two buckets is looked
+		// up once, since host.jobs.get is idempotent.
+		const cached = cache.get(jobId);
+		if (cached !== undefined || cache.has(jobId)) {
+			jobs.set(jobId, cached);
+			continue;
+		}
+		const job = await deps.host.jobs.get(jobId);
+		cache.set(jobId, job);
+		jobs.set(jobId, job);
 	}
 	return { items, jobs };
 }
@@ -164,9 +181,17 @@ export async function runSweep(deps: SweepDeps): Promise<SweepReport> {
 		pruned: 0,
 		errors: [],
 	};
+	const jobs = new Map<string, HostJobInfo | undefined>();
 	for (const bucket of await allBuckets(deps.host)) {
+		if (deps.signal?.aborted === true) {
+			// Cooperative stop: the harness is closing or the task was
+			// aborted; the next 15-minute tick sweeps the rest. `stops`
+			// is set only on a real stop, keeping the base report shape.
+			report.stops = (report.stops ?? 0) + 1;
+			continue;
+		}
 		try {
-			const plan = await planSweep(deps, bucket);
+			const plan = await planSweep(deps, bucket, jobs);
 			await migrateTransferredJobs(deps, bucket, plan, now);
 			const outcome = await sweepBucket(deps, bucket, plan, now);
 			report.snoozesEnded += outcome.report.snoozesEnded;
@@ -201,7 +226,7 @@ export function createSweepTask(deps: SweepDeps) {
 		initial: () => ({ phase: "sweep" as const }),
 		phases: {
 			sweep: async (_task, runtime, context) => {
-				await runSweep(deps);
+				await runSweep({ ...deps, signal: runtime.signal });
 				// REQUIRED: a phase returning without durable progress faults the
 				// task. The sweep's bookkeeping lives in the store files; the
 				// task's own terminal outcome is the durable progress.
