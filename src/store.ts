@@ -56,6 +56,10 @@ export async function bucketFor(
 	if (owner !== undefined && (await host.users.get(owner)) !== undefined) {
 		return { kind: "user", user: owner };
 	}
+	// The primary-admin fallback. Core guarantees a non-empty directory
+	// holds at least one admin (last_admin 409 guards on both demote and
+	// delete, src/server/routes/users.ts); the shared bucket is reached
+	// only by the empty directory, where list() is empty.
 	const primaryAdmin = (await host.users.list()).find((user) => user.admin);
 	return primaryAdmin === undefined
 		? { kind: "shared" }
