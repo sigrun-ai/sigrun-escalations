@@ -203,6 +203,16 @@ export async function createFakeHost(
 			list: notUsed(),
 			run: notUsed(),
 		},
+		// The curator lane's host surface (core 0.5.0): escalations never
+		// touches it — every member stays in the not-used family.
+		curation: new Proxy(
+			{} as SigrunHost["curation"],
+			{
+				get: () => {
+					throw new Error("not used in escalations tests");
+				},
+			},
+		),
 	};
 
 	return {
