@@ -34,11 +34,15 @@ export interface SweepReport {
     claimsExpired: number;
     pruned: number;
     errors: string[];
+    /** Buckets skipped after the abort signal fired. */
+    stops?: number;
 }
 export interface SweepDeps {
     readonly host: SigrunHost;
     readonly store: EscalationStore;
     readonly now?: () => Date;
+    /** Cooperative cancellation, checked between buckets (the task phase passes the invocation's runtime.signal). */
+    readonly signal?: AbortSignal;
 }
 /** The sweep body, shared by the task phase and directly unit-testable. */
 export declare function runSweep(deps: SweepDeps): Promise<SweepReport>;

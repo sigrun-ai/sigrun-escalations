@@ -398,7 +398,7 @@ export function createInboxView(deps) {
             const next = items.map((item) => (item.id === id ? apply(item) : item));
             const updated = next.find((item) => item.id === id);
             if (updated === undefined)
-                throw new Error("Escalation not found");
+                throw new TransitionError("not_found");
             return { items: next, result: updated };
         });
     }
@@ -420,6 +420,11 @@ export function createInboxView(deps) {
             };
         }
         catch (error) {
+            // The item vanished between findVisible and the update: the same
+            // not-found body as an unknown id, never a raw error.
+            if (error instanceof TransitionError && error.code === "not_found") {
+                return notFound();
+            }
             return failure(error);
         }
     }
@@ -440,7 +445,7 @@ export function createInboxView(deps) {
                 // An invalid id or an inapplicable status skips that item.
             }
         }
-        return { ok: true, toast: `${label} ${count} escalation(s)` };
+        return { ok: true, toast: `${label} ${count} escalation${count === 1 ? "" : "s"}` };
     }
     return {
         id: "inbox",

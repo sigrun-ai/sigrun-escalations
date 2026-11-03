@@ -8,8 +8,11 @@ function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
 function sourceText(e, jobName) {
-    if (e.source.jobId !== undefined)
-        return `job "${jobName ?? e.source.jobId}" (${e.source.jobId})`;
+    if (e.source.jobId !== undefined) {
+        return jobName === undefined
+            ? `job "${e.source.jobId}"`
+            : `job "${jobName}" (${e.source.jobId})`;
+    }
     if (e.source.conversationId !== undefined)
         return `conversation #${e.source.conversationId}`;
     return "none";

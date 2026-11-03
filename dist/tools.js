@@ -228,6 +228,9 @@ export function createTools(deps) {
                     next[index] = resolved;
                     return { items: next, result: resolved };
                 });
+                // The model reads these texts; keep them pinned in sync with
+                // the exact seedText expectation in dispatch.test.ts, which
+                // names escalation_resolve as the resolution path.
                 if (args.outcome === "failed")
                     await notifyReopened(deps.host, item);
                 changedInbox(deps.host, item.id);
