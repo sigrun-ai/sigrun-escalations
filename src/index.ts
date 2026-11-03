@@ -9,13 +9,21 @@ import { transferItems } from "./transfer.js";
 import { createTools } from "./tools.js";
 import type { Bucket } from "./types.js";
 
+export interface EscalationsOptions {
+	/** Injectable clock for tests; every timestamp the extension stamps. */
+	readonly now?: () => Date;
+}
+
 /**
  * Build the complete escalation surface over one shared durable store.
  * The required host parameter keeps the factory at arity one for the loader.
  */
-export default function createEscalations(host: SigrunHost): SigrunExtensionResult {
+export default function createEscalations(
+	host: SigrunHost,
+	options: EscalationsOptions = {},
+): SigrunExtensionResult {
 	const store = new EscalationStore(host);
-	const deps = { host, store };
+	const deps = { host, store, now: options.now };
 	return {
 		extension: defineExtension({
 			name: "escalations",
@@ -38,7 +46,7 @@ export default function createEscalations(host: SigrunHost): SigrunExtensionResu
 				source,
 				target,
 				new Set(sourceItems.map((item) => item.id)),
-				new Date(),
+				deps.now?.() ?? new Date(),
 			);
 		},
 	};
