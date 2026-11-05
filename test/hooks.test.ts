@@ -170,6 +170,21 @@ describe("published hooks", () => {
 		expect(stored?.claim?.conversationId).toBe(aliceConv);
 	});
 
+	it("take never reaches another user's bucket: bob sees none, alice's item untouched", async () => {
+		const host = await fakeHost();
+		const { store, takeHook } = setup(host);
+		const bobConv = await host.conversations.create({ owner: "bob" });
+		const seeded = await seedAnswered(store, { kind: "user", user: "alice" }, "user", "acme-key");
+
+		const result = (await takeHook.run({ key: "acme-key" }, call(bobConv, "bob"))) as TakeResult;
+		expect(result).toEqual({ status: "none" });
+
+		const [stored] = await items(store, { kind: "user", user: "alice" });
+		expect(stored?.id).toBe(seeded.id);
+		expect(stored?.status).toBe("answered");
+		expect(stored?.claim).toBeUndefined();
+	});
+
 	it("resolve done after take resolves; resolve from another conversation fails wrong_claimant", async () => {
 		const host = await fakeHost();
 		const { store, takeHook, resolveHook } = setup(host);

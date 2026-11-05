@@ -1,7 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { changedInbox } from "./keys.js";
-import { claim, raise, resolve } from "./lifecycle.js";
-import { notifyRaised } from "./notify.js";
+import { TransitionError, claim, raise, resolve } from "./lifecycle.js";
+import { notifyRaised, notifyReopened } from "./notify.js";
 import { bucketFor } from "./store.js";
 // Bounds mirror the escalate tool's parameters (tools.ts OptionSchema).
 const OptionSchema = Type.Object({
@@ -116,56 +116,45 @@ export function createPublishedHooks(deps) {
             const args = payload;
             const { namespace, bucket } = await context(deps, call, args.jobId);
             const conversationId = call.conversationId;
-            // The bucket is per-owner: a taker whose owner differs from the
-            // raiser's must still see the item, so search every user's bucket
-            // plus the shared bucket until the namespace+key match appears.
-            const users = await deps.host.users.list();
-            const buckets = [
-                bucket,
-                ...users
-                    .map((entry) => ({ kind: "user", user: entry.user }))
-                    .filter((candidate) => !(bucket.kind === "user" && candidate.user === bucket.user)),
-                { kind: "shared" },
-            ].filter((candidate, index, all) => all.findIndex((other) => other.kind === candidate.kind &&
-                (candidate.kind !== "user" ||
-                    (other.kind === "user" && other.user === candidate.user))) === index);
-            for (const candidate of buckets) {
-                const found = await deps.store.update(candidate, (items) => {
-                    const item = items.find((entry) => entry.namespace === namespace &&
-                        entry.key === args.key &&
-                        entry.status !== "resolved");
-                    if (item === undefined)
-                        return { items, result: undefined };
-                    if (item.status === "answered" ||
-                        (item.status === "claimed" && item.claim?.conversationId === conversationId)) {
-                        const claimed = claim(item, conversationId, now());
-                        const next = items.map((entry) => (entry === item ? claimed : entry));
-                        return {
-                            items: next,
-                            result: {
-                                status: "claimed",
-                                id: claimed.id,
-                                ...(claimed.answer?.option === undefined
-                                    ? {}
-                                    : { option: claimed.answer.option }),
-                            },
-                        };
-                    }
+            // Take stays in the caller's bucket: another user's item is never
+            // claimable (and its runSettled release sweep must not reach it).
+            const found = await deps.store.update(bucket, (items) => {
+                const item = items.find((entry) => entry.namespace === namespace &&
+                    entry.key === args.key &&
+                    entry.status !== "resolved");
+                if (item === undefined)
+                    return { items, result: undefined };
+                if (item.status === "answered" ||
+                    (item.status === "claimed" && item.claim?.conversationId === conversationId)) {
+                    const claimed = claim(item, conversationId, now());
+                    // Idempotent re-claim returns the item unchanged: keep the
+                    // original array so the store's no-write fast path applies.
+                    const next = claimed === item
+                        ? items
+                        : items.map((entry) => (entry === item ? claimed : entry));
                     return {
-                        items,
+                        items: next,
                         result: {
-                            status: item.status,
-                            id: item.id,
-                            ...(item.answer?.option === undefined
+                            status: "claimed",
+                            id: claimed.id,
+                            ...(claimed.answer?.option === undefined
                                 ? {}
-                                : { option: item.answer.option }),
+                                : { option: claimed.answer.option }),
                         },
                     };
-                });
-                if (found !== undefined)
-                    return found;
-            }
-            return { status: "none" };
+                }
+                return {
+                    items,
+                    result: {
+                        status: item.status,
+                        id: item.id,
+                        ...(item.answer?.option === undefined
+                            ? {}
+                            : { option: item.answer.option }),
+                    },
+                };
+            });
+            return found ?? { status: "none" };
         },
     };
     const resolveHook = {
@@ -186,12 +175,15 @@ export function createPublishedHooks(deps) {
             const item = await deps.store.update(bucket, (items) => {
                 const index = items.findIndex((candidate) => candidate.id === args.id);
                 if (index < 0)
-                    throw new Error("escalation.resolve: not_found");
+                    throw new TransitionError("not_found");
                 const resolved = resolve(items[index], conversationId, args.outcome, args.note ?? "", now());
                 const next = [...items];
                 next[index] = resolved;
                 return { items: next, result: resolved };
             });
+            // Mirrors escalation_resolve: a failed claim reopens for the owner.
+            if (args.outcome === "failed")
+                await notifyReopened(deps.host, item);
             changedInbox(deps.host, item.id);
             return { status: item.status };
         },
