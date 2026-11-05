@@ -165,6 +165,7 @@ export async function createFakeHost(
 		seedInteraction: notUsed(),
 		answerInteraction: notUsed(),
 		settleInteraction: notUsed(),
+		declineInteraction: notUsed(),
 		peekInteraction: notUsed(),
 		snapshotInteraction: notUsed(),
 		setAmbient: notUsed(),
@@ -176,6 +177,7 @@ export async function createFakeHost(
 				return jobs.get(id);
 			},
 			activeRun: notUsed(),
+			isJobRun: notUsed(),
 		},
 		notify: async (input) => {
 			record("notify", input);
