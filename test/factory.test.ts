@@ -171,6 +171,7 @@ describe("createEscalations", () => {
 		expect(Object.keys(result).sort()).toEqual([
 			"extension",
 			"jobs",
+			"publishedHooks",
 			"runSettled",
 			"surfaces",
 			"userDeleted",

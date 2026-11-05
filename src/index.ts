@@ -1,6 +1,7 @@
 import { defineExtension } from "@earendil-works/pi-durable";
 import type { SigrunExtensionResult, SigrunHost } from "@sigrun/sigrun/extension";
 import { createRunSettled } from "./dispatch.js";
+import { createPublishedHooks } from "./hooks.js";
 import { createInboxView } from "./inbox.js";
 import { escalationsSection } from "./section.js";
 import { EscalationStore } from "./store.js";
@@ -33,6 +34,7 @@ export default function createEscalations(
 		}),
 		jobs: [SWEEP_JOB],
 		runSettled: createRunSettled(deps),
+		publishedHooks: createPublishedHooks(deps),
 		surfaces: { views: [createInboxView(deps)] },
 		userDeleted: async (event) => {
 			const source: Bucket = { kind: "user", user: event.user };

@@ -175,6 +175,7 @@ export async function createFakeHost(
 				record("jobs.get", id);
 				return jobs.get(id);
 			},
+			activeRun: notUsed(),
 		},
 		notify: async (input) => {
 			record("notify", input);
@@ -207,7 +208,20 @@ export async function createFakeHost(
 				record("surfaces.changed", id, key, update);
 			},
 		},
-		models: { list: notUsed() },
+		notices: {
+			post: notUsed(),
+			clear: notUsed(),
+			list: notUsed(),
+		},
+		decisions: {
+			evaluate: notUsed(),
+			list: notUsed(),
+		},
+		publishedHooks: {
+			get: notUsed(),
+			call: notUsed(),
+		},
+		models: { list: notUsed(), complete: notUsed() },
 		commands: {
 			list: notUsed(),
 			run: notUsed(),

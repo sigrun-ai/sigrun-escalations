@@ -1,5 +1,6 @@
 import { defineExtension } from "@earendil-works/pi-durable";
 import { createRunSettled } from "./dispatch.js";
+import { createPublishedHooks } from "./hooks.js";
 import { createInboxView } from "./inbox.js";
 import { escalationsSection } from "./section.js";
 import { EscalationStore } from "./store.js";
@@ -22,6 +23,7 @@ export default function createEscalations(host, options = {}) {
         }),
         jobs: [SWEEP_JOB],
         runSettled: createRunSettled(deps),
+        publishedHooks: createPublishedHooks(deps),
         surfaces: { views: [createInboxView(deps)] },
         userDeleted: async (event) => {
             const source = { kind: "user", user: event.user };

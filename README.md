@@ -44,6 +44,30 @@ Resolves one item claimed by the current conversation:
 
 `done` moves the item to **Resolved**. `failed` returns it to **Open**, clears its answer and claim, and records that the action failed. Only the claiming conversation may resolve the item.
 
+## Published hooks
+
+The extension publishes three hooks for other extensions through core's published-hook registry (`host.publishedHooks`). All three require a call context with a `conversationId`; without one the call fails with `escalation hooks need a conversation`.
+
+The namespace is `job:<jobId>` when the payload passes a `jobId`, else the calling conversation's `meta.jobId`, else `"user"`. The bucket comes from the calling conversation's owner, exactly as the agent tools do. All writes go through the store's serialized `update`.
+
+### `escalation.raise`
+
+Input: `{ key, title, body, options, allowInstruction?, onAnswer?, jobId? }` with the same bounds as the `escalate` tool (`key` and `title` ≤ 200 chars, `body` ≤ 20000, 1–8 options with unique ids). Output: `{ id, created, status }`.
+
+Behavior mirrors `escalate`: an unresolved item with the same namespace and key is returned with `created: false` instead of duplicating; a new item notifies its owner. `onAnswer` defaults to `next-run` in a job namespace and `immediate` otherwise; `next-run` without any job context throws. `allowInstruction` defaults to `false`.
+
+### `escalation.take`
+
+Input: `{ key, jobId? }`. Output: `{ status, id?, option? }`.
+
+Finds the unresolved item with the given namespace and key. When none exists, returns `{ status: "none" }`. An **answered** item is claimed for the calling conversation, returning `{ status: "claimed", id, option }` with the answer's option. The take is idempotent for the claiming conversation; another conversation (or an **open** item) gets the item's current status without claiming anything.
+
+### `escalation.resolve`
+
+Input: `{ id, outcome: "done" | "failed", note? }` (`note` defaults to `""`). Output: `{ status }`.
+
+Finds the item by id and resolves it through the claiming conversation. Only the claiming conversation may resolve; a wrong claimant or an unclaimed item fails with the lifecycle transition code (`wrong_claimant` / `not_claimed`) as the error message.
+
 ## Next-run versus immediate dispatch
 
 For a job conversation, the default is **`next-run`**: the answer waits until a later scheduled run, when `escalation_list` claims it for action. `next-run` is valid only for an item raised by a scheduled job.
