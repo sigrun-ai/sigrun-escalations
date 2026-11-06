@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- peer pi-durable/pi-ai/chord ~1.5.0 (requires sigrun 0.10.0).
+
+
 ## [0.2.1] - 2026-11-06
 
 ### Changed
