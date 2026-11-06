@@ -8,12 +8,17 @@
  *   The open tab sorts reopened items first, then newest; resolved is
  *   newest first. An answered `next-run` item whose job is disabled
  *   shows the badge `Waiting: job disabled`.
- * - Detail mode is a page titled with the escalation title: markdown
- *   body, answer form (options in the agent's order, NONE marked
+ * - Split layout: the list is the page sidebar (tabs in the header),
+ *   the selected item (params `{tab?, id}`) fills main, and the row
+ *   being viewed carries a `Viewing` badge. An id with no tab lists the
+ *   item's own tab; on compact widths the page's selection drill-in
+ *   shows the list first.
+ * - The detail (main) is a header callout with the item's actions, the
+ *   markdown body, answer form (options in the agent's order, NONE marked
  *   recommended — the webui preselects recommended options and the
  *   proposed action may be destructive), snooze form seeded at 7 days
- *   (number fields have no `default` prop), Dismiss/Withdraw/Restore as
- *   page actions, conversation links, and the history as a log block.
+ *   (number fields have no `default` prop), Dismiss/Withdraw/Restore and
+ *   conversation links on the header callout, and the history as a log.
  *   Orphaned items show only the pinned warn callout and Dismiss.
  * - Every action resolves the item through `findVisible` over the
  *   caller's buckets, so another user's id behaves exactly like an
@@ -32,6 +37,16 @@ const TABS = [
     { id: "resolved", label: "Resolved" },
 ];
 const ACTIVE_STATUSES = ["answered", "claimed", "snoozed"];
+/** The tab an item of this status lists under. */
+function tabOf(status) {
+    if (status === "open")
+        return "open";
+    if (ACTIVE_STATUSES.includes(status))
+        return "active";
+    if (status === "dismissed")
+        return "dismissed";
+    return "resolved";
+}
 function isObject(payload) {
     return typeof payload === "object" && payload !== null && !Array.isArray(payload);
 }
@@ -182,6 +197,8 @@ export function createInboxView(deps) {
                 // Empty badge text is filtered by the channel, so the waiting
                 // badge shows only on rows that carry it.
                 { text: { $: "./waitingBadge" }, tone: "warn" },
+                // Marks the row whose detail fills main (split layout).
+                { text: { $: "./viewing" }, tone: "accent" },
             ],
             meta: [{ time: { $: "./updatedAt" }, format: "relative" }],
         };
@@ -205,8 +222,9 @@ export function createInboxView(deps) {
             onActivate: { type: "submit", name: "open" },
         };
     }
-    function listTree(tab, error) {
-        const main = error === undefined
+    /** The list column: the tab's collection, or the store-read error. */
+    function sidebarBlocks(tab, error) {
+        return error === undefined
             ? [collectionFor(tab)]
             : [
                 {
@@ -217,41 +235,54 @@ export function createInboxView(deps) {
                     body: error,
                 },
             ];
+    }
+    /** Main with nothing selected. */
+    function placeholderMain() {
+        return [
+            {
+                type: "markdown",
+                id: "inbox-select",
+                text: "Select an escalation from the list to read it and answer.",
+            },
+        ];
+    }
+    /** Main for an unknown id: identical for unknown and for invisible ids. */
+    function notFoundMain() {
+        return [
+            {
+                type: "callout",
+                id: "inbox-not-found-callout",
+                tone: "bad",
+                title: "Escalation not found",
+            },
+        ];
+    }
+    /**
+     * The split page: tabs in the header, the list in the sidebar, the
+     * selection (or a placeholder) in main. On compact widths the
+     * `selection` drill-in shows the list first; back returns to the tab.
+     */
+    function pageTree(tab, sidebar, main, selected) {
         return {
             v: 1,
             root: {
                 type: "page",
                 id: "inbox-root",
                 title: "Inbox",
+                subtitle: TABS.find((entry) => entry.id === tab)?.label ?? "",
                 actions: TABS.map((entry) => ({
                     id: `tab-${entry.id}`,
                     label: entry.label,
                     action: { type: "navigate", params: { tab: entry.id } },
                 })),
+                sidebar,
                 main,
+                selection: { selected, back: { tab } },
             },
         };
     }
-    /** The not-found page: identical for unknown and for invisible ids. */
-    function notFoundTree() {
-        return {
-            v: 1,
-            root: {
-                type: "page",
-                id: "inbox-not-found",
-                title: "Inbox",
-                main: [
-                    {
-                        type: "callout",
-                        id: "inbox-not-found-callout",
-                        tone: "bad",
-                        title: "Escalation not found",
-                    },
-                ],
-            },
-        };
-    }
-    function detailTree(item, jobName) {
+    /** Main for one selected item: header card with its actions, body, forms, history. */
+    function detailMain(item, jobName) {
         const orphaned = item.orphaned === true;
         const actions = [];
         if (item.status === "open" || item.status === "answered") {
@@ -303,7 +334,16 @@ export function createInboxView(deps) {
                 },
             });
         }
-        const main = [];
+        const main = [
+            {
+                type: "callout",
+                id: "inbox-item",
+                tone: "neutral",
+                title: item.title,
+                body: `${sourceLabel(item, jobName)} · ${item.status}`,
+                actions,
+            },
+        ];
         if (orphaned) {
             main.push({
                 type: "callout",
@@ -369,17 +409,7 @@ export function createInboxView(deps) {
             lines: historyLines(item),
             wrap: true,
         });
-        return {
-            v: 1,
-            root: {
-                type: "page",
-                id: "inbox-detail",
-                title: item.title,
-                subtitle: sourceLabel(item, jobName),
-                actions,
-                main,
-            },
-        };
+        return main;
     }
     /** The shared action preamble: resolve the item inside the caller's buckets. */
     async function visibleItem(ctx, payload) {
@@ -475,29 +505,33 @@ export function createInboxView(deps) {
                     access: "none",
                 };
             }
-            const id = typeof ctx.params.id === "string" ? ctx.params.id : undefined;
-            if (id !== undefined) {
-                const found = await findVisible(store, buckets, id);
-                if (found === undefined) {
-                    // Nothing here can be acted on, so the page is not writable.
-                    return { tree: notFoundTree(), data: {}, access: "none" };
-                }
-                const job = await jobOf(found.item);
-                return {
-                    tree: detailTree(found.item, job?.name),
-                    data: { answer: {}, snooze: { days: 7 } },
-                    access: "write",
-                };
-            }
+            const id = typeof ctx.params.id === "string" && ctx.params.id !== ""
+                ? ctx.params.id
+                : undefined;
+            const found = id === undefined ? undefined : await findVisible(store, buckets, id);
             const tabParam = ctx.params.tab;
+            // An id with no tab (a notice or tool link) opens the list the
+            // item lives in.
             const tab = TABS.some((entry) => entry.id === tabParam)
                 ? tabParam
-                : "open";
+                : found !== undefined
+                    ? tabOf(found.item.status)
+                    : "open";
+            let main;
+            if (id === undefined)
+                main = placeholderMain();
+            else if (found === undefined)
+                main = notFoundMain();
+            else
+                main = detailMain(found.item, (await jobOf(found.item))?.name);
+            const selected = id !== undefined;
+            const detailData = found === undefined ? {} : { answer: {}, snooze: { days: 7 } };
             try {
                 const rows = (await Promise.all(buckets.map(rowsFor))).flat();
-                const data = { items: sortForTab(rows, tab) };
+                const items = sortForTab(rows, tab).map((row) => found !== undefined && row.id === found.item.id ? { ...row, viewing: "Viewing" } : row);
+                const data = { items, ...detailData };
                 return {
-                    tree: listTree(tab),
+                    tree: pageTree(tab, sidebarBlocks(tab), main, selected),
                     // SAFETY: rows are a JSON mirror (plain literals), same cast
                     // the curator view uses for its data document.
                     data: data,
@@ -506,20 +540,27 @@ export function createInboxView(deps) {
             }
             catch (error) {
                 return {
-                    tree: listTree(tab, errorText(error)),
-                    data: { error: errorText(error) },
+                    tree: pageTree(tab, sidebarBlocks(tab, errorText(error)), main, selected),
+                    data: { error: errorText(error), ...detailData },
                     access: "write",
                 };
             }
         },
         actions: {
-            open: async (_ctx, payload) => {
+            open: async (ctx, payload) => {
                 const id = itemIdOf(payload);
                 if (id === undefined)
                     return notFound();
+                // Keep the list the row was opened from beside the selection.
+                const tab = TABS.some((entry) => entry.id === ctx.params.tab)
+                    ? ctx.params.tab
+                    : undefined;
                 return {
                     ok: true,
-                    navigate: { type: "navigate", params: { id } },
+                    navigate: {
+                        type: "navigate",
+                        params: tab === undefined ? { id } : { tab, id },
+                    },
                 };
             },
             answer: async (ctx, payload) => await actOn(ctx, payload, async ({ bucket, item }) => {

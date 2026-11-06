@@ -342,6 +342,67 @@ describe("inbox list mode", () => {
 	});
 });
 
+/** The rendered page root (every inbox tree is one `page`). */
+function rootOf(rendered: { tree: unknown }): Record<string, unknown> {
+	return (rendered.tree as { root: Record<string, unknown> }).root;
+}
+
+describe("inbox split layout", () => {
+	test("the list rides the sidebar; the selected item's detail fills main", async () => {
+		const { store, view } = await rig();
+		const first = await seed(store, ALICE, { key: "disk:/srv/a" });
+		const second = await seed(store, ALICE, { key: "disk:/srv/b" });
+		const rendered = await view.render(ctxOf("alice", { tab: "open", id: second.id }));
+		checkTree(view, rendered.tree);
+		const root = rootOf(rendered);
+		expect(root.type).toBe("page");
+		const sidebar = JSON.stringify(root.sidebar);
+		expect(sidebar).toContain('"collection"');
+		expect(new Set(itemsOf(rendered).map((item) => item.id))).toEqual(
+			new Set([first.id, second.id]),
+		);
+		const main = JSON.stringify(root.main);
+		expect(main).toContain(second.title);
+		expect(main).toContain("Evidence and proposed action for disk:/srv/b");
+		expect(main).not.toContain('"collection"');
+		expect(root.selection).toEqual({ selected: true, back: { tab: "open" } });
+		expect(rendered.access).toBe("write");
+		// The viewed row is marked; the others are not.
+		const rows = itemsOf(rendered) as unknown as Record<string, unknown>[];
+		expect(rows.find((row) => row.id === second.id)?.viewing).toBe("Viewing");
+		expect(rows.find((row) => row.id === first.id)?.viewing).toBeUndefined();
+	});
+
+	test("with nothing selected, main asks for a selection", async () => {
+		const { store, view } = await rig();
+		await seed(store, ALICE, { key: "disk:/srv/a" });
+		const rendered = await view.render(ctxOf("alice"));
+		checkTree(view, rendered.tree);
+		const root = rootOf(rendered);
+		expect(JSON.stringify(root.main)).toContain("Select an escalation");
+		expect(root.selection).toEqual({ selected: false, back: { tab: "open" } });
+	});
+
+	test("an id with no tab shows the list the item lives in", async () => {
+		const { store, view } = await rig();
+		await seed(store, ALICE, { key: "disk:/srv/open" });
+		const answered = await seed(store, ALICE, { key: "disk:/srv/answered", status: "answered" });
+		const rendered = await view.render(ctxOf("alice", { id: answered.id }));
+		expect(itemsOf(rendered).map((item) => item.id)).toEqual([answered.id]);
+		expect(rootOf(rendered).selection).toEqual({ selected: true, back: { tab: "active" } });
+	});
+
+	test("open keeps the current tab beside the selected id", async () => {
+		const { store, view } = await rig();
+		const item = await seed(store, ALICE, { key: "disk:/srv/d", status: "dismissed" });
+		const result = await act(view, ctxOf("alice", { tab: "dismissed" }), "open", { itemId: item.id });
+		expect(result).toEqual({
+			ok: true,
+			navigate: { type: "navigate", params: { tab: "dismissed", id: item.id } },
+		});
+	});
+});
+
 describe("inbox detail mode", () => {
 	test("open item: answer form (no recommended option), snooze form, dismiss action, history; tree validates", async () => {
 		const { store, view } = await rig();
@@ -421,9 +482,9 @@ describe("inbox detail mode", () => {
 		const item = await seed(store, ALICE, { key: "disk:/srv/secret" });
 		const other = await view.render(ctxOf("bob", { id: item.id }));
 		const unknown = await view.render(ctxOf("bob", { id: "nope" }));
-		// The not-found page cannot be acted on: access none, never write.
-		expect(other.access).toBe("none");
+		// Bob still sees his own list; main says not found, identically.
 		expect(JSON.stringify(other)).toEqual(JSON.stringify(unknown));
+		expect(JSON.stringify(rootOf(other).main)).toContain("Escalation not found");
 		expect(JSON.stringify(other.tree)).not.toContain("disk:/srv/secret");
 		expect(JSON.stringify(other.tree)).not.toContain(item.title);
 		checkTree(view, other.tree);
