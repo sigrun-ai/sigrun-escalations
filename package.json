@@ -1,6 +1,6 @@
 {
 	"name": "@sigrun/escalations",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Escalation inbox extension for sigrun: async decisions for jobs and agents",
 	"type": "module",
 	"engines": {
