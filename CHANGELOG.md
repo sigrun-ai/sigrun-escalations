@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is preserved for the loader).
 
 ## [Unreleased]
+## [0.2.0] - 2026-11-05
+
+### Added
+
+- Published hooks `escalation.raise`, `escalation.take` and
+  `escalation.resolve`: the extension-to-extension seam over the same
+  store and lifecycle as the `escalate` tool. `take` claims an ANSWERED
+  item for the calling conversation (idempotent per conversation,
+  caller's bucket only); `resolve` needs the claiming conversation
+  (wrong_claimant propagates). The warden is the first consumer
+  (one-shot job grants).
+
 ### Added
 - The escalation extension factory with `escalate`, `escalation_list`, and
   `escalation_resolve` tools, prompt guidance, a four-tab Inbox, immediate
