@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { changedInbox } from "./keys.js";
 import { TransitionError, claim, raise, resolve } from "./lifecycle.js";
 import { notifyRaised, notifyReopened } from "./notify.js";

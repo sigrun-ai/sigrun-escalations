@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, } from "@earendil-works/pi-durable";
 import { changedInbox } from "./keys.js";
 import { TransitionError, claim, isSkip, raise, resolve } from "./lifecycle.js";
