@@ -458,10 +458,17 @@ export function createInboxView(deps) {
             return failure(error);
         }
     }
-    /** One bulk action: apply per id, skipping ids that are not actionable. */
-    async function actOnMany(ctx, payload, apply, label) {
+    /** One bulk action: apply per id, skipping ids that are not actionable.
+     *  When the item open in main (`ctx.params.id`) is among those moved,
+     *  return to `fromTab` (the list the bulk action belongs to) — the
+     *  page shows the open item's own tab, so staying would list the
+     *  destination tab under the source tab's tree. Single Dismiss does
+     *  the same. */
+    async function actOnMany(ctx, payload, apply, label, fromTab) {
         const buckets = await bucketsVisibleTo(host, ctx.principal);
+        const openId = typeof ctx.params.id === "string" ? ctx.params.id : undefined;
         let count = 0;
+        let movedOpen = false;
         for (const id of idsOf(payload)) {
             const found = await findVisible(store, buckets, id);
             if (found === undefined)
@@ -470,12 +477,20 @@ export function createInboxView(deps) {
                 await apply(found);
                 changedInbox(host, id);
                 count += 1;
+                if (id === openId)
+                    movedOpen = true;
             }
             catch {
                 // An invalid id or an inapplicable status skips that item.
             }
         }
-        return { ok: true, toast: `${label} ${count} escalation${count === 1 ? "" : "s"}` };
+        return {
+            ok: true,
+            toast: `${label} ${count} escalation${count === 1 ? "" : "s"}`,
+            ...(movedOpen
+                ? { navigate: { type: "navigate", params: { tab: fromTab } } }
+                : {}),
+        };
     }
     return {
         id: "inbox",
@@ -607,10 +622,10 @@ export function createInboxView(deps) {
             }),
             "dismiss-many": async (ctx, payload) => await actOnMany(ctx, payload, async ({ bucket, item }) => {
                 await transition(bucket, item.id, (current) => dismiss(current, now()));
-            }, "Dismissed"),
+            }, "Dismissed", "open"),
             "restore-many": async (ctx, payload) => await actOnMany(ctx, payload, async ({ bucket, item }) => {
                 await transition(bucket, item.id, (current) => restore(current, now()));
-            }, "Restored"),
+            }, "Restored", "dismissed"),
         },
     };
 }

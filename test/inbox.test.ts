@@ -664,6 +664,43 @@ describe("inbox actions", () => {
 		expect((await store.list(ALICE))[0]?.status).toBe("open");
 	});
 
+	test("a bulk action that moves the OPEN item returns to the list it came from", async () => {
+		// The page shows the open item's own tab: once it is dismissed, the
+		// {id} instance would list the Dismissed tab under the Open tree.
+		// Like single Dismiss, go back to the list instead.
+		const { store, view } = await rig();
+		const open = await seed(store, ALICE, { key: "disk:/srv/a" });
+		const other = await seed(store, ALICE, { key: "disk:/srv/b" });
+		const dismissed = await act(view, ctxOf("alice", { id: open.id }), "dismiss-many", {
+			ids: [open.id, other.id],
+		});
+		expect(dismissed).toMatchObject({
+			ok: true,
+			toast: "Dismissed 2 escalations",
+			navigate: { type: "navigate", params: { tab: "open" } },
+		});
+		const restored = await act(view, ctxOf("alice", { id: open.id }), "restore-many", {
+			ids: [open.id],
+		});
+		expect(restored).toMatchObject({
+			ok: true,
+			navigate: { type: "navigate", params: { tab: "dismissed" } },
+		});
+	});
+
+	test("a bulk action that leaves the open item alone does not navigate", async () => {
+		const { store, view } = await rig();
+		const open = await seed(store, ALICE, { key: "disk:/srv/a" });
+		const other = await seed(store, ALICE, { key: "disk:/srv/b" });
+		const result = await act(view, ctxOf("alice", { id: open.id }), "dismiss-many", {
+			ids: [other.id],
+		});
+		expect(result.ok).toBe(true);
+		expect(result).not.toHaveProperty("navigate");
+		const listed = await act(view, ctxOf("alice"), "dismiss-many", { ids: [open.id] });
+		expect(listed).not.toHaveProperty("navigate");
+	});
+
 	test("the bulk toast pluralizes", async () => {
 		const { store, view } = await rig();
 		const one = await seed(store, ALICE, { key: "disk:/srv/a" });

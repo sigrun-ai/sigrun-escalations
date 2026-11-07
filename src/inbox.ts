@@ -536,15 +536,23 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 		}
 	}
 
-	/** One bulk action: apply per id, skipping ids that are not actionable. */
+	/** One bulk action: apply per id, skipping ids that are not actionable.
+	 *  When the item open in main (`ctx.params.id`) is among those moved,
+	 *  return to `fromTab` (the list the bulk action belongs to) — the
+	 *  page shows the open item's own tab, so staying would list the
+	 *  destination tab under the source tab's tree. Single Dismiss does
+	 *  the same. */
 	async function actOnMany(
 		ctx: SurfaceContext,
 		payload: unknown,
 		apply: (found: { bucket: Bucket; item: Escalation }) => Promise<void>,
 		label: string,
+		fromTab: Tab,
 	): Promise<ActionResult> {
 		const buckets = await bucketsVisibleTo(host, ctx.principal);
+		const openId = typeof ctx.params.id === "string" ? ctx.params.id : undefined;
 		let count = 0;
+		let movedOpen = false;
 		for (const id of idsOf(payload)) {
 			const found = await findVisible(store, buckets, id);
 			if (found === undefined) continue;
@@ -552,11 +560,18 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 				await apply(found);
 				changedInbox(host, id);
 				count += 1;
+				if (id === openId) movedOpen = true;
 			} catch {
 				// An invalid id or an inapplicable status skips that item.
 			}
 		}
-		return { ok: true, toast: `${label} ${count} escalation${count === 1 ? "" : "s"}` };
+		return {
+			ok: true,
+			toast: `${label} ${count} escalation${count === 1 ? "" : "s"}`,
+			...(movedOpen
+				? { navigate: { type: "navigate" as const, params: { tab: fromTab } } }
+				: {}),
+		};
 	}
 
 	return {
@@ -713,6 +728,7 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 						await transition(bucket, item.id, (current) => dismiss(current, now()));
 					},
 					"Dismissed",
+					"open",
 				),
 			"restore-many": async (ctx, payload) =>
 				await actOnMany(
@@ -722,6 +738,7 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 						await transition(bucket, item.id, (current) => restore(current, now()));
 					},
 					"Restored",
+					"dismissed",
 				),
 		},
 	};
