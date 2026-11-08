@@ -94,23 +94,42 @@ describe("runSweep", () => {
 		const host = await fakeHost({
 			users: [{ user: "alice", admin: true }],
 			jobs: {
-				"ownerless-check": { ...job(undefined), id: "ownerless-check" },
+				"ownerless-check": {
+					id: "ownerless-check",
+					name: "Ownerless check",
+					enabled: true,
+					state: "waiting",
+				},
 			},
 		});
 		const store = new EscalationStore(host);
 		await seed(store, { kind: "shared" }, [
 			answer(
-				{ ...item("ownerless", "ownerless-check"), key: "disk:/srv/ownerless" },
+				{
+					...item("ownerless", "ownerless-check"),
+					owner: undefined,
+					key: "disk:/srv/ownerless",
+				},
 				{ option: "retry", by: "alice" },
 				NOW,
 			),
 			answer(
-				{ ...item("deleted", "deleted-check"), key: "disk:/srv/deleted" },
+				{
+					...item("deleted", "deleted-check"),
+					owner: undefined,
+					key: "disk:/srv/deleted",
+				},
 				{ option: "retry", by: "alice" },
 				NOW,
 			),
 			answer(
-				{ ...item("no-job"), namespace: "user", key: "disk:/srv/no-job", source: {} },
+				{
+					...item("no-job"),
+					owner: undefined,
+					namespace: "user",
+					key: "disk:/srv/no-job",
+					source: {},
+				},
 				{ option: "retry", by: "alice" },
 				NOW,
 			),
