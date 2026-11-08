@@ -57,6 +57,29 @@ async function planSweep(deps, bucket, cache) {
     }
     return { items, jobs };
 }
+/** Move items raised before the directory had users to their current buckets. */
+async function migrateSharedItems(deps, plan, now) {
+    if ((await deps.host.users.list()).length === 0)
+        return [];
+    const source = { kind: "shared" };
+    const groups = new Map();
+    for (const item of plan.items) {
+        const jobId = jobIdOf(item);
+        const owner = jobId === undefined ? undefined : plan.jobs.get(jobId)?.owner;
+        let ids = groups.get(owner);
+        if (ids === undefined) {
+            ids = new Set();
+            groups.set(owner, ids);
+        }
+        ids.add(item.id);
+    }
+    const moved = [];
+    for (const [owner, ids] of groups) {
+        const target = await bucketFor(deps.host, owner);
+        moved.push(...await transferItems(deps.store, source, target, ids, now));
+    }
+    return moved;
+}
 /** Reconcile job-owned items into the buckets of their jobs' current owners. */
 async function migrateTransferredJobs(deps, bucket, plan, now) {
     const owner = bucket.kind === "user" ? bucket.user : undefined;
@@ -137,7 +160,9 @@ export async function runSweep(deps) {
         }
         try {
             const plan = await planSweep(deps, bucket, jobs);
-            const moved = await migrateTransferredJobs(deps, bucket, plan, now);
+            const moved = bucket.kind === "shared"
+                ? await migrateSharedItems(deps, plan, now)
+                : await migrateTransferredJobs(deps, bucket, plan, now);
             const outcome = await sweepBucket(deps, bucket, plan, now);
             report.snoozesEnded += outcome.report.snoozesEnded;
             report.orphaned += outcome.report.orphaned;

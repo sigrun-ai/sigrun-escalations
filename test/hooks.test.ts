@@ -102,6 +102,35 @@ describe("published hooks", () => {
 		expect(notifies).toHaveLength(1);
 	});
 
+	it("raise next-run without a job is refused", async () => {
+		const host = await fakeHost();
+		const { raiseHook } = setup(host);
+		const conversationId = await host.conversations.create({ owner: "alice" });
+
+		await expect(
+			raiseHook.run({ ...RAISE_PAYLOAD, onAnswer: "next-run" }, call(conversationId)),
+		).rejects.toThrow("escalation.raise: next-run needs a scheduled job run; use immediate");
+	});
+
+	it("duplicate option ids are refused", async () => {
+		const host = await fakeHost();
+		const { raiseHook } = setup(host);
+		const conversationId = await host.conversations.create({ owner: "alice" });
+
+		await expect(
+			raiseHook.run(
+				{
+					...RAISE_PAYLOAD,
+					options: [
+						{ id: "retry", label: "Retry the check" },
+						{ id: "retry", label: "Retry later" },
+					],
+				},
+				call(conversationId),
+			),
+		).rejects.toThrow("escalation.raise: option ids must be unique");
+	});
+
 	it("raise with jobId uses namespace job:<jobId> even when meta has no jobId", async () => {
 		const host = await fakeHost();
 		const { store, raiseHook } = setup(host);
@@ -121,6 +150,23 @@ describe("published hooks", () => {
 		expect(stored).toHaveLength(2);
 		expect(stored.find((item) => item.id === jobResult.id)?.namespace).toBe(`job:${JOB}`);
 		expect(stored.find((item) => item.id === userResult.id)?.namespace).toBe("user");
+	});
+
+	it("take outside the item's job namespace finds nothing", async () => {
+		const host = await fakeHost();
+		const { store, takeHook } = setup(host);
+		const conversationId = await host.conversations.create({ owner: "alice" });
+		const seeded = await seedAnswered(
+			store,
+			{ kind: "user", user: "alice" },
+			`job:${JOB}`,
+			"acme-key",
+		);
+
+		await expect(takeHook.run({ key: "acme-key" }, call(conversationId))).resolves.toEqual({
+			status: "none",
+		});
+		expect((await items(store, { kind: "user", user: "alice" }))[0]).toEqual(seeded);
 	});
 
 	it("take on an open item returns open and claims nothing", async () => {

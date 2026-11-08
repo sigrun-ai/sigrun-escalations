@@ -226,7 +226,7 @@ describe("createEscalations", () => {
 		expect(await stored(host, "alice")).toEqual([]);
 	});
 
-	it("recovers a failed source rewrite by deduplicating on the next transfer", async () => {
+	it("keeps the source when a failed source rewrite leaves duplicate copies", async () => {
 		const { host, result } = await rig();
 		const store = wiring.stores[0] as EscalationStore;
 		await seedAlice(store);
@@ -248,6 +248,11 @@ describe("createEscalations", () => {
 		const target = await stored(host, "bob");
 		expect(target.map((entry) => entry.id)).toEqual(["first", "second"]);
 		expect(target.every((entry) => entry.owner === "bob")).toBe(true);
-		expect(await stored(host, "alice")).toEqual([]);
+		// A matching target id alone cannot prove delivery on retry: the
+		// surviving source is the only authoritative copy of that transfer.
+		expect((await stored(host, "alice")).map((entry) => entry.id)).toEqual([
+			"first",
+			"second",
+		]);
 	});
 });
