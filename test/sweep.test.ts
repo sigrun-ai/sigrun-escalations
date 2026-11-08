@@ -153,7 +153,53 @@ describe("runSweep", () => {
 
 		expect(await store.list({ kind: "shared" })).toEqual([]);
 		expect(await store.list(ALICE)).toEqual([]);
-		expect((await store.list(BOB)).map((entry) => entry.id)).toEqual(["shared-item"]);
+		const migrated = await store.list(BOB);
+		expect(migrated.map((entry) => entry.id)).toEqual(["shared-item"]);
+
+		const beforeSecondSweep = JSON.stringify(migrated);
+		await runSweep({ host, store, now: () => NOW });
+		expect(JSON.stringify(await store.list(BOB))).toBe(beforeSecondSweep);
+		expect(await store.list(ALICE)).toEqual([]);
+		expect(await store.list({ kind: "shared" })).toEqual([]);
+	});
+
+	it("keeps both copies when a crash retry finds the target id already present", async () => {
+		const host = await fakeHost({
+			users: [
+				{ user: "alice", admin: true },
+				{ user: "bob", admin: false },
+			],
+			jobs: {
+				"alice-check": { ...job("alice"), id: "alice-check" },
+				"bob-check": { ...job("bob"), id: "bob-check" },
+			},
+		});
+		const store = new EscalationStore(host);
+		const deliveredA: Escalation = { ...item("a", "bob-check"), owner: "bob" };
+		const sourceB = item("b", "alice-check");
+		const deliveredB: Escalation = { ...sourceB, owner: "alice" };
+		// A completed its transfer to bob. The process then crashed after
+		// copying B to alice but before removing B from the shared bucket.
+		await seed(store, BOB, [deliveredA]);
+		await seed(store, ALICE, [deliveredB]);
+		await seed(store, { kind: "shared" }, [sourceB]);
+
+		await runSweep({ host, store, now: () => NOW });
+
+		expect(await store.list(BOB)).toEqual([deliveredA]);
+		expect(await store.list(ALICE)).toEqual([deliveredB]);
+		expect(await store.list({ kind: "shared" })).toEqual([sourceB]);
+
+		// If the unresolved target duplicate goes away, a later sweep can
+		// deliver the surviving source and complete the transfer normally.
+		await store.update(ALICE, (items) => ({
+			items: items.filter((entry) => entry.id !== "b"),
+			result: undefined,
+		}));
+		await runSweep({ host, store, now: () => NOW });
+		expect(await store.list({ kind: "shared" })).toEqual([]);
+		expect((await store.list(ALICE)).map((entry) => entry.id)).toEqual(["b"]);
+		expect(await store.list(BOB)).toEqual([deliveredA]);
 	});
 
 	it("leaves shared items in the shared bucket while the directory is empty", async () => {

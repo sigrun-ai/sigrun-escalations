@@ -1,7 +1,8 @@
 /**
  * Copy selected items to a new owner before removing them from the source.
- * A crash between the updates leaves duplicates; the id check makes retrying
- * the copy idempotent, so a later delivery can finish without losing items.
+ * A crash between the updates leaves duplicates. Only ids copied by this call
+ * are removed from the source: a pre-existing target id is an unresolved
+ * duplicate while the source still holds it, so both copies survive for retry.
  */
 export async function transferItems(store, source, target, ids, now) {
     // Same-bucket transfer is a no-op; unreachable through bucketFor (a
@@ -18,7 +19,7 @@ export async function transferItems(store, source, target, ids, now) {
         return [];
     const sourceOwner = source.kind === "user" ? source.user : "shared";
     const targetOwner = target.kind === "user" ? target.user : undefined;
-    const idsInTarget = await store.update(target, (targetItems) => {
+    const copiedIds = await store.update(target, (targetItems) => {
         const held = new Set(targetItems.map((item) => item.id));
         const additions = sourceItems
             .filter((item) => !held.has(item.id))
@@ -38,12 +39,12 @@ export async function transferItems(store, source, target, ids, now) {
             items: additions.length === 0
                 ? targetItems
                 : [...targetItems, ...additions],
-            result: new Set([...held, ...additions.map((item) => item.id)]),
+            result: new Set(additions.map((item) => item.id)),
         };
     });
     await store.update(source, (items) => ({
-        items: items.filter((item) => !idsInTarget.has(item.id)),
+        items: items.filter((item) => !copiedIds.has(item.id)),
         result: undefined,
     }));
-    return [...idsInTarget].filter((id) => ids.has(id));
+    return [...copiedIds];
 }
