@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The sweep moves escalations raised while the user directory was empty
+  out of the shared bucket once users exist. Items with a live job follow
+  that job's owner; ownerless, deleted-job, and non-job items move to the
+  primary admin.
+
 ## [0.2.3] - 2026-11-07
 
 ### Fixed

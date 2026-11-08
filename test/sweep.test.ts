@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { HostJobInfo } from "@sigrun/sigrun/extension";
 import { afterEach, describe, expect, it } from "vitest";
+import { createPublishedHooks } from "../src/hooks.js";
 import { answer, claim, raise, snooze } from "../src/lifecycle.js";
 import { EscalationStore } from "../src/store.js";
 import { SWEEP_JOB, SWEEP_TASK_NAME, runSweep } from "../src/sweep.js";
@@ -89,6 +90,88 @@ afterEach(async () => {
 });
 
 describe("runSweep", () => {
+	it("shared items move to the primary admin", async () => {
+		const host = await fakeHost({
+			users: [{ user: "alice", admin: true }],
+			jobs: {
+				"ownerless-check": { ...job(undefined), id: "ownerless-check" },
+			},
+		});
+		const store = new EscalationStore(host);
+		await seed(store, { kind: "shared" }, [
+			answer(
+				{ ...item("ownerless", "ownerless-check"), key: "disk:/srv/ownerless" },
+				{ option: "retry", by: "alice" },
+				NOW,
+			),
+			answer(
+				{ ...item("deleted", "deleted-check"), key: "disk:/srv/deleted" },
+				{ option: "retry", by: "alice" },
+				NOW,
+			),
+			answer(
+				{ ...item("no-job"), namespace: "user", key: "disk:/srv/no-job", source: {} },
+				{ option: "retry", by: "alice" },
+				NOW,
+			),
+		]);
+
+		await expect(runSweep({ host, store, now: () => NOW })).resolves.toMatchObject({ errors: [] });
+
+		expect(await store.list({ kind: "shared" })).toEqual([]);
+		const migrated = await store.list(ALICE);
+		expect(migrated.map((entry) => entry.id)).toEqual(["ownerless", "deleted", "no-job"]);
+		expect(migrated.every((entry) => entry.owner === "alice")).toBe(true);
+
+		const hooks = createPublishedHooks({ host, store, now: () => NOW });
+		const takeHook = hooks.find((hook) => hook.name === "escalation.take")!;
+		const resolveHook = hooks.find((hook) => hook.name === "escalation.resolve")!;
+		const conversationId = await host.conversations.create({ owner: "alice", job: "deleted-check" });
+		const hookCall = { caller: "acme", user: "alice", conversationId, abortSignal: undefined };
+		await expect(takeHook.run({ key: "disk:/srv/deleted" }, hookCall)).resolves.toEqual({
+			status: "claimed",
+			id: "deleted",
+			option: "retry",
+		});
+		await expect(resolveHook.run({ id: "deleted", outcome: "done" }, hookCall)).resolves.toEqual({
+			status: "resolved",
+		});
+	});
+
+	it("shared items follow a live job's owner", async () => {
+		const host = await fakeHost({
+			users: [
+				{ user: "alice", admin: true },
+				{ user: "bob", admin: false },
+			],
+			jobs: { "nightly-check": job("bob") },
+		});
+		const store = new EscalationStore(host);
+		await seed(store, { kind: "shared" }, [item("shared-item")]);
+
+		await runSweep({ host, store, now: () => NOW });
+
+		expect(await store.list({ kind: "shared" })).toEqual([]);
+		expect(await store.list(ALICE)).toEqual([]);
+		expect((await store.list(BOB)).map((entry) => entry.id)).toEqual(["shared-item"]);
+	});
+
+	it("leaves shared items in the shared bucket while the directory is empty", async () => {
+		const host = await fakeHost();
+		const store = new EscalationStore(host);
+		await seed(store, { kind: "shared" }, [
+			item("job-item"),
+			{ ...item("user-item"), namespace: "user", key: "disk:/srv/user", source: {} },
+		]);
+
+		await runSweep({ host, store, now: () => NOW });
+
+		expect((await store.list({ kind: "shared" })).map((entry) => entry.id)).toEqual([
+			"job-item",
+			"user-item",
+		]);
+	});
+
 	it("migrates items after their job changes owner, then leaves the second sweep unchanged", async () => {
 		const host = await fakeHost({
 			users: [
