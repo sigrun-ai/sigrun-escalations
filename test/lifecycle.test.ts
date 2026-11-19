@@ -13,6 +13,7 @@ import {
 	resolve,
 	restore,
 	snooze,
+	unclaim,
 	withdraw,
 } from "../src/lifecycle.js";
 import {
@@ -300,6 +301,27 @@ describe("release", () => {
 	it("rejects a different conversation", () => {
 		expectCode(
 			() => release(claimed(), 11, "Wrong conversation", SETTLED_AT),
+			"not_claimed",
+		);
+	});
+});
+
+describe("unclaim", () => {
+	it("returns an interrupted claim to answered, keeping the answer for the next run", () => {
+		const before = claimed();
+		const after = unclaim(before, 10, "The run stopped", SETTLED_AT);
+
+		expectTransition(before, after, "interrupted", SETTLED_AT);
+		expect(after.status).toBe("answered");
+		expect(after.answer).toEqual(before.answer);
+		expect(after.claim).toBeUndefined();
+		expect(after.reopenReason).toBeUndefined();
+		expect(after.history.at(-1)).toMatchObject({ note: "The run stopped" });
+	});
+
+	it("rejects a different conversation", () => {
+		expectCode(
+			() => unclaim(claimed(), 11, "Wrong conversation", SETTLED_AT),
 			"not_claimed",
 		);
 	});

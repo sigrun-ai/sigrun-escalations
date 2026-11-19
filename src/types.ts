@@ -1,7 +1,11 @@
+import type { JsonObject } from "@earendil-works/pi-durable";
+
 export type EscalationStatus = "open" | "answered" | "claimed" | "resolved" | "dismissed" | "snoozed";
 export type OnAnswer = "next-run" | "immediate";
 export type ReopenReason = "snooze-ended" | "failed" | "interrupted" | "job-deleted";
-export interface EscalationOption { id: string; label: string; detail?: string }
+/** A tool call an option authorizes when chosen (shown in the inbox; matched by the warden). */
+export type EscalationCall = { tool: string; arguments: JsonObject };
+export type EscalationOption = { id: string; label: string; detail?: string; calls?: EscalationCall[] };
 export interface EscalationAnswer { option?: string; instruction?: string; by?: string; at: string }
 export interface HistoryEntry { at: string; event: "raised" | "answered" | "withdrawn" | "claimed" | "resolved" | "failed" | "interrupted" | "dismissed" | "restored" | "snoozed" | "snooze-ended" | "job-deleted" | "transferred"; note?: string; answer?: EscalationAnswer }
 export interface Escalation {

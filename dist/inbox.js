@@ -138,6 +138,14 @@ function historyLines(item) {
         return { at: entry.at, text: parts.join(" — ") };
     });
 }
+/** An option's detail plus the exact calls choosing it authorizes. */
+function optionDescription(option) {
+    const lines = [
+        ...(option.detail === undefined ? [] : [option.detail]),
+        ...(option.calls ?? []).map((entry) => `Runs: ${entry.tool} ${JSON.stringify(entry.arguments)}`),
+    ];
+    return lines.length === 0 ? undefined : lines.join("\n");
+}
 export function createInboxView(deps) {
     const { host, store } = deps;
     const now = () => deps.now?.() ?? new Date();
@@ -360,11 +368,14 @@ export function createInboxView(deps) {
                     type: "choice",
                     name: "option",
                     label: "Choose an action",
-                    options: item.options.map((option) => ({
-                        id: option.id,
-                        label: option.label,
-                        ...(option.detail === undefined ? {} : { description: option.detail }),
-                    })),
+                    options: item.options.map((option) => {
+                        const description = optionDescription(option);
+                        return {
+                            id: option.id,
+                            label: option.label,
+                            ...(description === undefined ? {} : { description }),
+                        };
+                    }),
                 },
             ];
             if (item.allowInstruction) {

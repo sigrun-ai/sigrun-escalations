@@ -126,6 +126,8 @@ export async function createFakeHost(
 		patchMeta: notUsed(),
 		upload: notUsed(),
 		readFile: notUsed(),
+		setAutoName: notUsed(),
+		markContext: notUsed(),
 	};
 
 	const host: SigrunHost = {
@@ -149,6 +151,7 @@ export async function createFakeHost(
 			secrets: {
 				get: notUsed(),
 				set: notUsed(),
+				delete: notUsed(),
 			},
 			settings: {
 				get: notUsed(),
@@ -223,7 +226,9 @@ export async function createFakeHost(
 			get: notUsed(),
 			call: notUsed(),
 		},
-		models: { list: notUsed(), complete: notUsed() },
+		models: { list: notUsed(), isLocal: notUsed(), complete: notUsed() },
+		settings: { declare: notUsed() },
+		embeddings: { embed: notUsed(), list: notUsed() },
 		commands: {
 			list: notUsed(),
 			run: notUsed(),

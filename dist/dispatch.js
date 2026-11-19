@@ -1,5 +1,5 @@
 import { changedInbox } from "./keys.js";
-import { TransitionError, claim, release, reopen } from "./lifecycle.js";
+import { TransitionError, claim, release, reopen, unclaim } from "./lifecycle.js";
 import { notifyReopened } from "./notify.js";
 import { bucketFor } from "./store.js";
 import { transferItems } from "./transfer.js";
@@ -140,15 +140,21 @@ export function createRunSettled(deps) {
                 const next = current.map((item) => {
                     if (item.status !== "claimed" || item.claim?.conversationId !== event.conversationId)
                         return item;
-                    const reopened = release(item, event.conversationId, RUN_ENDED, deps.now?.() ?? new Date());
-                    nextReleased.push(reopened);
-                    return reopened;
+                    const now = deps.now?.() ?? new Date();
+                    // A next-run answer stands: the job's next run claims it
+                    // again. An immediate (or orphaned) one reopens.
+                    const settled = item.onAnswer === "next-run" && item.orphaned !== true
+                        ? unclaim(item, event.conversationId, RUN_ENDED, now)
+                        : release(item, event.conversationId, RUN_ENDED, now);
+                    nextReleased.push(settled);
+                    return settled;
                 });
                 return { items: nextReleased.length === 0 ? current : next, result: nextReleased };
             });
             for (const item of released) {
                 try {
-                    await notifyReopened(deps.host, item);
+                    if (item.status === "open")
+                        await notifyReopened(deps.host, item);
                 }
                 catch (error) {
                     console.warn(`escalations: reopen notification failed for ${item.id}`, error);

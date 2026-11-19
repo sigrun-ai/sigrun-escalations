@@ -111,6 +111,16 @@ export function release(e, conversationId, note, now) {
         reopenReason: "interrupted",
     });
 }
+/**
+ * Return a next-run claim to answered when its run ended without resolving
+ * it: the answer stands, and the job's next run claims it again.
+ */
+export function unclaim(e, conversationId, note, now) {
+    if (e.status !== "claimed" || e.claim?.conversationId !== conversationId) {
+        throw new TransitionError("not_claimed");
+    }
+    return changed(e, now, { event: "interrupted", note }, { status: "answered", claim: undefined, reopenReason: undefined });
+}
 export function dismiss(e, now) {
     if (e.status !== "open" && e.status !== "answered") {
         throw new TransitionError("not_dismissable");

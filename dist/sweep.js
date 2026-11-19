@@ -15,7 +15,7 @@
  */
 import { defineTask } from "@earendil-works/pi-durable";
 import { changedInbox } from "./keys.js";
-import { endSnooze, orphan, release } from "./lifecycle.js";
+import { endSnooze, orphan, release, unclaim } from "./lifecycle.js";
 import { notifyOrphaned, notifyReopened } from "./notify.js";
 import { allBuckets, bucketFor } from "./store.js";
 import { transferItems } from "./transfer.js";
@@ -131,7 +131,11 @@ async function sweepBucket(deps, bucket, plan, now) {
             if (current.status === "claimed" &&
                 current.claim !== undefined &&
                 current.claim.at <= new Date(now.getTime() - CLAIM_TIMEOUT_MS).toISOString()) {
-                current = release(current, current.claim.conversationId, CLAIM_TIMED_OUT, now);
+                // A next-run answer stands (the job's next run claims it again);
+                // an immediate or orphaned one reopens for the owner.
+                current = current.onAnswer === "next-run" && current.orphaned !== true
+                    ? unclaim(current, current.claim.conversationId, CLAIM_TIMED_OUT, now)
+                    : release(current, current.claim.conversationId, CLAIM_TIMED_OUT, now);
                 report.claimsExpired += 1;
             }
             next.push(current);

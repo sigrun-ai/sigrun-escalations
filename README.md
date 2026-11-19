@@ -19,7 +19,7 @@ Raises a decision for the conversation owner. Parameters:
 - `key` (string, required): a stable identifier for the underlying issue, such as a resource key.
 - `title` (string, required): a short summary.
 - `body` (string, required): self-contained evidence, context, and the proposed action.
-- `options` (array, required): one to eight choices. Each has a stable `id`, a `label`, and an optional `detail`. Do not offer “do nothing” or “later” choices; the person already has Dismiss and Snooze.
+- `options` (array, required): one to eight choices. Each has a stable `id`, a `label`, an optional `detail`, and optional `calls`: up to 16 `{ tool, arguments }` entries naming the exact tool calls the option authorizes. The Inbox shows each call under its option, and the claiming run sees the chosen option's calls in `escalation_list`. Do not offer “do nothing” or “later” choices; the person already has Dismiss and Snooze.
 - `allowInstruction` (boolean, optional): whether the answer may include a free-text instruction. Defaults to `true`.
 - `onAnswer` (`"next-run"` or `"immediate"`, optional): how to act after the answer. See below.
 
@@ -30,9 +30,9 @@ An unresolved item with the same key in the same job or user namespace is return
 Takes no parameters and returns two groups:
 
 - **`skip`**: keys the current job must not act on because a matching escalation is open, answered, claimed, dismissed, or snoozed and is not held by this conversation. A dismissed or snoozed issue therefore stays out of the job's way until the person restores it or the snooze ends.
-- **`act`**: answered `next-run` items whose work this conversation should carry out, including the chosen option and any instruction.
+- **`act`**: answered `next-run` items whose work this conversation should carry out, including the chosen option, any instruction, and the chosen option's approved calls.
 
-A scheduled (`cron`) run atomically claims its actionable items when it lists them. Other callers only see claims they already hold. After carrying out each claimed item, the run must resolve it.
+A scheduled (`cron`) run atomically claims its actionable items when it lists them. Other callers only see claims they already hold. After carrying out each claimed item, the run must resolve it. A run that ends without resolving a claimed `next-run` item returns it to answered with the answer kept, so the job's next run claims it again.
 
 ### `escalation_resolve`
 
@@ -46,7 +46,7 @@ Resolves one item claimed by the current conversation:
 
 ## Published hooks
 
-The extension publishes three hooks for other extensions through core's published-hook registry (`host.publishedHooks`). All three require a call context with a `conversationId`; without one the call fails with `escalation hooks need a conversation`.
+The extension publishes four hooks for other extensions through core's published-hook registry (`host.publishedHooks`). All four require a call context with a `conversationId`; without one the call fails with `escalation hooks need a conversation`.
 
 The namespace is `job:<jobId>` when the payload passes a `jobId`, else the calling conversation's `meta.jobId`, else `"user"`. The bucket comes from the calling conversation's owner, exactly as the agent tools do. All writes go through the store's serialized `update`.
 
@@ -68,11 +68,17 @@ Input: `{ id, outcome: "done" | "failed", note? }` (`note` defaults to `""`). Ou
 
 Finds the item by id and resolves it through the claiming conversation. Only the claiming conversation may resolve; a wrong claimant or an unclaimed item fails with the lifecycle transition code (`wrong_claimant` / `not_claimed`) as the error message.
 
+### `escalation.approved-calls`
+
+Input: `{ jobId? }`. Output: `{ calls: [{ id, tool, arguments }] }`.
+
+Lists the calls declared by the chosen option of every item in the namespace that the calling conversation has claimed (`id` is the item's id). Items without a chosen option, or whose chosen option declares no calls, contribute nothing. The warden uses this to let a run make exactly the calls a person approved. Escalations stores and shows the calls but never interprets them.
+
 ## Next-run versus immediate dispatch
 
 For a job conversation, the default is **`next-run`**: the answer waits until a later scheduled run, when `escalation_list` claims it for action. `next-run` is valid only for an item raised by a scheduled job.
 
-For an ordinary agent conversation, the default is **`immediate`**: answering starts a fresh run in a **new conversation**, seeded with the escalation and the answer. It does not resume or modify the source conversation. An immediate item from a job also starts a fresh run. If the new run cannot be created or seeded, the item returns to open; if it settles without resolving its claim, the item is released back to open.
+For an ordinary agent conversation, the default is **`immediate`**: answering starts a fresh run in a **new conversation**, seeded with the escalation and the answer. It does not resume or modify the source conversation. An immediate item from a job also starts a fresh run. If the new run cannot be created or seeded, the item returns to open; if it settles without resolving its claim, the item is released back to open. A `next-run` item whose claiming run settles unresolved keeps its answer and returns to answered for the next run.
 
 ## The Inbox
 
@@ -85,4 +91,4 @@ The Inbox has four tabs:
 
 An open item can be answered by selecting an offered option and, when allowed, adding an instruction. **Dismiss** and **Snooze** are user-only actions, never agent options. A snooze lasts from 1 to 365 days; when it ends, the maintenance job returns the item to open. Nothing automatically answers an escalation or acts merely because a snooze expired.
 
-The maintenance sweep also releases claims older than 24 hours, marks items whose source job was deleted, and prunes old resolved records. An orphaned item offers only Dismiss; nothing acts on it automatically.
+The maintenance sweep also releases claims older than 24 hours (a `next-run` item keeps its answer), marks items whose source job was deleted, and prunes old resolved records. An orphaned item offers only Dismiss; nothing acts on it automatically.

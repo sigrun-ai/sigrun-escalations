@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Escalation options may declare `calls`: the exact `{ tool, arguments }`
+  calls the option authorizes (up to 16). The Inbox shows them under the
+  option, and `escalation_list` names the chosen option's calls.
+- The `escalation.approved-calls` published hook lists the chosen
+  options' calls of items the calling conversation has claimed. The
+  warden uses it to let a run make exactly the calls a person approved.
+
+### Changed
+
+- A run that ends without resolving a claimed `next-run` item (or a claim
+  that times out after 24 hours) returns it to answered with the answer
+  kept, so the job's next run claims it again. It no longer reopens with
+  the answer cleared, which made the person answer the same item again.
+  Immediate items still reopen.
+
 ## [0.2.5] - 2026-11-08
 
 - CI: test against the latest released core (core-ref: release). No code change.

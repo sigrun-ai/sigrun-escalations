@@ -359,6 +359,28 @@ describe("createRunSettled", () => {
 		expect(calls(host, "surfaces.changed")).toHaveLength(12);
 	});
 
+	it("returns a settled run's next-run claims to answered, keeping the answer, with no reopen notice", async () => {
+		const host = await fakeHost({ users: [{ user: "alice", admin: false }] });
+		const store = new EscalationStore(host);
+		const nextRun = claim(
+			answer({ ...immediate("act-1"), onAnswer: "next-run" }, { option: "retry" }, NOW),
+			10,
+			NOW,
+		);
+		await seed(store, [nextRun]);
+		const handler = createRunSettled({ host, store, now: () => NOW });
+
+		await settle(handler, 10);
+		const [item] = await store.list(ALICE);
+		expect(item).toMatchObject({ status: "answered", answer: { option: "retry" } });
+		expect(item?.claim).toBeUndefined();
+		expect(item?.history.at(-1)).toMatchObject({
+			event: "interrupted",
+			note: "run ended without resolving the escalation",
+		});
+		expect(calls(host, "notify")).toEqual([]);
+	});
+
 	it("resolves without throwing when the store read fails", async () => {
 		const host = await fakeHost({ users: [{ user: "alice", admin: false }] });
 		const store = new EscalationStore(host);
