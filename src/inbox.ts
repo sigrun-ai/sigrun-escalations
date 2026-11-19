@@ -51,7 +51,7 @@ import {
 	bucketsVisibleTo,
 	findVisible,
 } from "./store.js";
-import type { Bucket, Escalation, EscalationStatus } from "./types.js";
+import type { Bucket, Escalation, EscalationOption, EscalationStatus } from "./types.js";
 
 export interface InboxDeps {
 	readonly host: SigrunHost;
@@ -188,6 +188,17 @@ function historyLines(item: Escalation): { at: string; text: string }[] {
 		if (entry.note !== undefined) parts.push(entry.note);
 		return { at: entry.at, text: parts.join(" — ") };
 	});
+}
+
+/** An option's detail plus the exact calls choosing it authorizes. */
+function optionDescription(option: EscalationOption): string | undefined {
+	const lines = [
+		...(option.detail === undefined ? [] : [option.detail]),
+		...(option.calls ?? []).map(
+			(entry) => `Runs: ${entry.tool} ${JSON.stringify(entry.arguments)}`,
+		),
+	];
+	return lines.length === 0 ? undefined : lines.join("\n");
 }
 
 export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
@@ -426,11 +437,14 @@ export function createInboxView(deps: InboxDeps): SurfaceDef<"view"> {
 					type: "choice",
 					name: "option",
 					label: "Choose an action",
-					options: item.options.map((option) => ({
-						id: option.id,
-						label: option.label,
-						...(option.detail === undefined ? {} : { description: option.detail }),
-					})),
+					options: item.options.map((option) => {
+						const description = optionDescription(option);
+						return {
+							id: option.id,
+							label: option.label,
+							...(description === undefined ? {} : { description }),
+						};
+					}),
 				},
 			];
 			if (item.allowInstruction) {

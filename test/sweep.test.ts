@@ -424,7 +424,7 @@ describe("runSweep", () => {
 		expect(order.indexOf("jobs.get")).toBeLessThan(order.indexOf("store.update"));
 	});
 
-	it("releases a claim 24h+1ms old with note 'claim timed out' and leaves a 23h claim", async () => {
+	it("returns a next-run claim 24h+1ms old to answered with note 'claim timed out' and leaves a 23h claim", async () => {
 		const host = await fakeHost({
 			users: [{ user: "alice", admin: false }],
 			jobs: { "nightly-check": job() },
@@ -447,11 +447,11 @@ describe("runSweep", () => {
 		const items = await store.list(ALICE);
 		const released = items.find((e) => e.id === "stale");
 		expect(released).toMatchObject({
-			status: "open",
-			reopenReason: "interrupted",
+			status: "answered",
+			answer: { option: "retry" },
 		});
 		expect(released?.claim).toBeUndefined();
-		expect(released?.answer).toBeUndefined();
+		expect(released?.reopenReason).toBeUndefined();
 		expect(released?.history.at(-1)).toMatchObject({
 			event: "interrupted",
 			note: "claim timed out",

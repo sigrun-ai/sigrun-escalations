@@ -2,7 +2,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PublishedHookCall } from "@sigrun/sigrun/extension";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPublishedHooks } from "../src/hooks.js";
-import { answer, raise } from "../src/lifecycle.js";
+import { answer, claim, raise } from "../src/lifecycle.js";
 import { EscalationStore } from "../src/store.js";
 import type { Bucket, Escalation } from "../src/types.js";
 import {
@@ -32,7 +32,13 @@ function setup(host: FakeHost) {
 		if (hook === undefined) throw new Error(`missing hook ${name}`);
 		return hook;
 	};
-	return { store, raiseHook: byName("escalation.raise"), takeHook: byName("escalation.take"), resolveHook: byName("escalation.resolve") };
+	return {
+		store,
+		raiseHook: byName("escalation.raise"),
+		takeHook: byName("escalation.take"),
+		resolveHook: byName("escalation.resolve"),
+		approvedCallsHook: byName("escalation.approved-calls"),
+	};
 }
 
 function call(conversationId: ConversationId | undefined, user = "alice"): PublishedHookCall {
@@ -85,7 +91,68 @@ afterEach(async () => {
 	while (hosts.length > 0) await hosts.pop()!.cleanup();
 });
 
+const REMOVE_CALL = {
+	tool: "acme/remove_items",
+	arguments: { ids: [1, 2], purge: true },
+};
+
+/** A job item whose "remove" option declares REMOVE_CALL, answered `option`. */
+function jobItem(key: string, option: string): Escalation {
+	const opened = raise(
+		{
+			owner: "alice",
+			namespace: `job:${JOB}`,
+			key,
+			title: "Stale items",
+			body: "Two stale items were found.",
+			options: [
+				{ id: "remove", label: "Remove both", calls: [REMOVE_CALL] },
+				{ id: "skip", label: "Skip" },
+			],
+			allowInstruction: false,
+			onAnswer: "next-run",
+			source: { jobId: JOB },
+		},
+		NOW,
+	);
+	return answer(opened, { option, by: "alice" }, NOW);
+}
+
 describe("published hooks", () => {
+	it("approved-calls lists the chosen option's calls of items this conversation claimed", async () => {
+		const host = await fakeHost();
+		const { store, approvedCallsHook } = setup(host);
+		const mine = await host.conversations.create({ owner: "alice" });
+		const other = await host.conversations.create({ owner: "alice" });
+		const approved = claim(jobItem("k-approved", "remove"), mine, NOW);
+		const skipped = claim(jobItem("k-skipped", "skip"), mine, NOW);
+		const elsewhere = claim(jobItem("k-elsewhere", "remove"), other, NOW);
+		const unclaimed = jobItem("k-unclaimed", "remove");
+		await store.update({ kind: "user", user: "alice" }, () => ({
+			items: [approved, skipped, elsewhere, unclaimed],
+			result: undefined,
+		}));
+
+		await expect(approvedCallsHook.run({ jobId: JOB }, call(mine))).resolves.toEqual({
+			calls: [{ id: approved.id, ...REMOVE_CALL }],
+		});
+	});
+
+	it("raise stores an option's declared calls", async () => {
+		const host = await fakeHost();
+		const { store, raiseHook } = setup(host);
+		const conversationId = await host.conversations.create({ owner: "alice" });
+		await raiseHook.run(
+			{
+				...RAISE_PAYLOAD,
+				options: [{ id: "remove", label: "Remove both", calls: [REMOVE_CALL] }],
+			},
+			call(conversationId),
+		);
+		const [stored] = await items(store, { kind: "user", user: "alice" });
+		expect(stored?.options[0]?.calls).toEqual([REMOVE_CALL]);
+	});
+
 	it("raise creates once and dedups by namespace+key", async () => {
 		const host = await fakeHost();
 		const { store, raiseHook } = setup(host);

@@ -18,6 +18,11 @@ export interface ToolDeps {
 	readonly now?: () => Date;
 }
 
+const CallSchema = Type.Object({
+	tool: Type.String({ minLength: 1, maxLength: 200 }),
+	arguments: Type.Record(Type.String(), Type.Unknown()),
+});
+
 const OptionSchema = Type.Object({
 	id: Type.String({
 		minLength: 1,
@@ -26,6 +31,9 @@ const OptionSchema = Type.Object({
 	}),
 	label: Type.String({ minLength: 1, maxLength: 200 }),
 	detail: Type.Optional(Type.String({ maxLength: 2000 })),
+	// The exact tool calls this option authorizes when chosen: the inbox
+	// shows them, and the warden lets the claiming run make them.
+	calls: Type.Optional(Type.Array(CallSchema, { maxItems: 16 })),
 });
 
 const AnswerSchema = Type.Object({
@@ -71,6 +79,15 @@ function answerText(e: Escalation): string {
 		.join("; ");
 }
 
+/** The chosen option's declared calls, one line, or undefined when it declares none. */
+function approvedCallsText(e: Escalation): string | undefined {
+	const chosen = e.options.find((option) => option.id === e.answer?.option);
+	if (chosen?.calls === undefined || chosen.calls.length === 0) return undefined;
+	return `  Approved calls: ${chosen.calls
+		.map((entry) => `${entry.tool} ${JSON.stringify(entry.arguments)}`)
+		.join("; ")}`;
+}
+
 function listText(skip: readonly string[], act: readonly Escalation[]): string {
 	return [
 		"## Skip",
@@ -82,6 +99,7 @@ function listText(skip: readonly string[], act: readonly Escalation[]): string {
 					`- ${e.id} — ${e.title} (${e.key})`,
 					`  Body: ${e.body}`,
 					`  Answer: ${answerText(e)}`,
+					...(approvedCallsText(e) === undefined ? [] : [approvedCallsText(e)!]),
 				])),
 	].join("\n");
 }
@@ -149,7 +167,9 @@ export function createTools(deps: ToolDeps): ToolRegistration[] {
 						key: args.key,
 						title: args.title,
 						body: args.body,
-						options: args.options,
+						// Tool arguments arrive as parsed JSON, so each call's
+						// `arguments` record is a JSON object.
+						options: args.options as EscalationOption[],
 						allowInstruction: args.allowInstruction ?? true,
 						onAnswer,
 						source: {

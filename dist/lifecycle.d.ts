@@ -16,6 +16,11 @@ export declare function resolve(e: Escalation, conversationId: number, outcome: 
 /** Reopen an unclaimed answer when its immediate action could not start. */
 export declare function reopen(e: Escalation, note: string, now: Date): Escalation;
 export declare function release(e: Escalation, conversationId: number, note: string, now: Date): Escalation;
+/**
+ * Return a next-run claim to answered when its run ended without resolving
+ * it: the answer stands, and the job's next run claims it again.
+ */
+export declare function unclaim(e: Escalation, conversationId: number, note: string, now: Date): Escalation;
 export declare function dismiss(e: Escalation, now: Date): Escalation;
 export declare function restore(e: Escalation, now: Date): Escalation;
 export declare function snooze(e: Escalation, days: number, now: Date): Escalation;

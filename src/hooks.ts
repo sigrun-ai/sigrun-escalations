@@ -8,9 +8,14 @@ import { changedInbox } from "./keys.js";
 import { TransitionError, claim, raise, resolve } from "./lifecycle.js";
 import { notifyRaised, notifyReopened } from "./notify.js";
 import { bucketFor } from "./store.js";
-import type { Bucket } from "./types.js";
+import type { Bucket, EscalationOption } from "./types.js";
 
 // Bounds mirror the escalate tool's parameters (tools.ts OptionSchema).
+const CallSchema = Type.Object({
+	tool: Type.String({ minLength: 1, maxLength: 200 }),
+	arguments: Type.Record(Type.String(), Type.Unknown()),
+});
+
 const OptionSchema = Type.Object({
 	id: Type.String({
 		minLength: 1,
@@ -19,6 +24,7 @@ const OptionSchema = Type.Object({
 	}),
 	label: Type.String({ minLength: 1, maxLength: 200 }),
 	detail: Type.Optional(Type.String({ maxLength: 2000 })),
+	calls: Type.Optional(Type.Array(CallSchema, { maxItems: 16 })),
 });
 
 const KeySchema = Type.String({ minLength: 1, maxLength: 200 });
@@ -29,7 +35,7 @@ interface RaisePayload {
 	readonly key: string;
 	readonly title: string;
 	readonly body: string;
-	readonly options: readonly { id: string; label: string; detail?: string }[];
+	readonly options: readonly EscalationOption[];
 	readonly allowInstruction?: boolean;
 	readonly onAnswer?: "next-run" | "immediate";
 	readonly jobId?: string;
@@ -251,5 +257,43 @@ export function createPublishedHooks(deps: DispatchDeps): readonly PublishedHook
 		},
 	};
 
-	return [raiseHook, takeHook, resolveHook];
+	const approvedCallsHook: PublishedHook = {
+		name: "escalation.approved-calls",
+		description:
+			"The tool calls authorized by the chosen options of escalations the calling conversation has claimed.",
+		input: Type.Object({ jobId: JobIdSchema }),
+		output: Type.Object({
+			calls: Type.Array(
+				Type.Object({
+					id: Type.String(),
+					tool: Type.String(),
+					arguments: Type.Record(Type.String(), Type.Unknown()),
+				}),
+			),
+		}),
+		async run(payload, call) {
+			const args = payload as { readonly jobId?: string };
+			const { namespace, bucket } = await context(deps, call, args.jobId);
+			const conversationId = call.conversationId!;
+			const items = await deps.store.list(bucket);
+			const calls = items.flatMap((item) => {
+				if (
+					item.namespace !== namespace ||
+					item.status !== "claimed" ||
+					item.claim?.conversationId !== conversationId
+				) {
+					return [];
+				}
+				const chosen = item.options.find((option) => option.id === item.answer?.option);
+				return (chosen?.calls ?? []).map((entry) => ({
+					id: item.id,
+					tool: entry.tool,
+					arguments: entry.arguments,
+				}));
+			});
+			return { calls };
+		},
+	};
+
+	return [raiseHook, takeHook, resolveHook, approvedCallsHook];
 }

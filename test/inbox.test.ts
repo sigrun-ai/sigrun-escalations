@@ -404,6 +404,27 @@ describe("inbox split layout", () => {
 });
 
 describe("inbox detail mode", () => {
+	test("an option's declared calls show in its description, after its detail", async () => {
+		const { store, view } = await rig();
+		const item = await seed(store, ALICE, {
+			key: "disk:/srv/a",
+			options: [
+				{
+					id: "retry",
+					label: "Remove both",
+					detail: "Frees the disk",
+					calls: [{ tool: "acme/remove_items", arguments: { ids: [1, 2] } }],
+				},
+				{ id: "skip", label: "Skip" },
+			],
+		});
+		const rendered = await view.render(ctxOf("alice", { id: item.id }));
+		checkTree(view, rendered.tree);
+		expect(JSON.stringify(rendered.tree)).toContain(
+			JSON.stringify('Frees the disk\nRuns: acme/remove_items {"ids":[1,2]}').slice(1, -1),
+		);
+	});
+
 	test("open item: answer form (no recommended option), snooze form, dismiss action, history; tree validates", async () => {
 		const { store, view } = await rig();
 		const item = await seed(store, ALICE, { key: "disk:/srv/a" });

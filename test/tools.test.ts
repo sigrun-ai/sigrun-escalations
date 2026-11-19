@@ -203,6 +203,45 @@ describe("tool contracts", () => {
 	});
 });
 
+describe("approved calls", () => {
+	const REMOVE_CALL = { tool: "acme/remove_items", arguments: { ids: [1, 2], purge: true } };
+	const CALL_OPTIONS = [
+		{ id: "retry", label: "Remove both", calls: [REMOVE_CALL] },
+		{ id: "skip", label: "Skip" },
+	];
+
+	it("escalate validates an option's declared calls through the real argument validator", async () => {
+		const { tools } = await rig();
+		const escalate = tools[0] as ToolRegistration;
+		const validate = (options: unknown) => () =>
+			validateToolArguments(escalate, {
+				id: "call-1",
+				name: escalate.name,
+				type: "toolCall",
+				arguments: escalationArgs({ options }) as Parameters<
+					typeof validateToolArguments
+				>[1]["arguments"],
+			});
+		expect(validate(CALL_OPTIONS)).not.toThrow();
+		expect(validate([{ id: "retry", label: "Remove", calls: [{ arguments: {} }] }])).toThrow(
+			/Validation failed for tool "escalate"/,
+		);
+	});
+
+	it("escalation_list names the chosen option's calls for the run to execute", async () => {
+		const { host, store, call } = await rig();
+		await seed(store, [
+			seeded("act-1", "disk:/srv/act", "answered", { options: CALL_OPTIONS }),
+		]);
+		setMeta(host, 10, meta("alice", "cron", "api:1"));
+
+		const text = output(await call("escalation_list", 10));
+		expect(text).toContain(
+			'  Approved calls: acme/remove_items {"ids":[1,2],"purge":true}',
+		);
+	});
+});
+
 describe("escalate", () => {
 	it("raises in the job namespace, notifies alice, and invalidates every inbox key", async () => {
 		const { host, store, call } = await rig();
