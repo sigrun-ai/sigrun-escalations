@@ -5,6 +5,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import type {
 	ToolExecutionApi,
 	ToolExecutionResult,
+	ToolPark,
 	ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { SessionMeta } from "@sigrun/shared/session-meta";
@@ -28,6 +29,12 @@ import {
 	type FakeHost,
 	type FakeHostOptions,
 } from "./fake-host.js";
+
+/** Tests drive tools that never park: narrow, asserting no park happened. */
+function settle(result: ToolExecutionResult | ToolPark): ToolExecutionResult {
+	if ("sleep" in result || "wait" in result) throw new Error("test tool parked unexpectedly");
+	return result;
+}
 
 const ALICE: Bucket = { kind: "user", user: "alice" };
 const NOW = new Date("2026-11-02T12:00:00.000Z");
@@ -66,11 +73,11 @@ async function rig(opts: FakeHostOptions = { users: [{ user: "alice", admin: fal
 	): Promise<ToolExecutionResult> => {
 		const tool = tools.find((candidate) => candidate.name === name);
 		if (tool === undefined) throw new Error(`missing tool ${name}`);
-		return await tool.execute(
+		return settle(await tool.execute(
 			args,
 			{ conversationId, callId: "call-1" } as ToolExecutionApi,
 			BACKGROUND_CONTEXT,
-		);
+		));
 	};
 	return { host, store, tools, call };
 }
